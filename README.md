@@ -19,8 +19,11 @@ The PoC hardware layout consists of modular components chosen for power efficien
 •	Lighting Array: WS2815 Addressable LED Strip (12V) – delivers customizable full-spectrum photosynthetic lighting.
 •	Sensor Array: KY-018 Photoresistor (LDR) Module for ambient light evaluation; DHT22 for ambient atmospheric monitoring; and DS18B20 for direct liquid core temperature tracking.
 3.2 Pin Configuration Table
-To ensure structural replicability and clear resource allocation for future scaling, the physical connections between the ESP32 and peripheral hardware nodes are defined below: 
-Component	Component
+To ensure structural replicability and clear resource allocation for future scaling, the physical connections between the ESP32 and peripheral hardware nodes are defined below:
+
+Component	
+Component
+
 Pin	ESP32 GPIO
 Pin	Connection Type / Purpose
 KY-018 LDR
@@ -29,7 +32,7 @@ Sensor	S (Signal)	GPIO34 (D34)	Analog Input (Ambient Light Intensity Tracking)
 WS2815 LED Strip	DI (Data In)	GPIO32 (D32)	Digital Output (FastLED SPI Data Stream
 Control)
 WS2815 LED Strip	BI (Backup In)	GND	Tied to Common Ground for Signal Stability
-  4. Software Logic, Hardware Requirements, and Safety
+  5. Software Logic, Hardware Requirements, and Safety
 4.1 Core Automation & Control Logic
 The automation architecture utilizes localized conditional loops executed continuously by the ESP32 core: 
 •	Smart Lighting (Grow Light: Relay 1 + Light Sensor): Operates via a hybrid, energy-conserving protocol.
@@ -69,6 +72,8 @@ Qualitative post-test reviews will be performed with canteen kitchen operators t
 •	Leak and Water Routing Test: The water circulation line will run continuously for 10 minutes to verify pressurized joints and confirm condensation sheds perfectly via the drip loops.
 •	UI Resilience (Debounce Test): The manual activation button will be subjected to high-frequency mechanical inputs. The software must filter out physical bounce noises and limit the action to one clean 10-second run.
   6. Bill of Materials (BOM)
+
+	 
 Item
 #	Component Name	Primary Function in Project	Qty
 1	ESP32 DevKit V1		1
@@ -91,7 +96,7 @@ Converter	Converts 12V main power down to stable 5V for logic electronics.	1
 12	Solderless Breadboard & Jumper
 Wires	Used for quick, secure prototyping and shared GND connections.	1
 13	Opaque Water Tank & Tubing	Structural reservoir protected from light to prevent algae.	1
-  7. Future Scope & Scalability
+  8. Future Scope & Scalability
 7.1 Advanced Chemical & Water Automation
 •	Automated Nutrient and pH Dosing: Integration of glass pH probes and electrical conductivity (EC) sensors paired with industrial peristaltic pump heads to automate fertilizer adjustments without human calculations.
 •	Auto-Refill Infrastructure: Direct plumbing coupling via solid-state solenoid valves and low-draw physical float switches to completely automate fluid replenishment routines.
