@@ -14,8 +14,8 @@
 // ==========================================
 // WI-FI CONFIGURATION
 // ==========================================
-const char* ssid     = "YOUR_WIFI_NAME";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* ssid     = "RASPBERRYNET";
+const char* password = "VerySecret";
 
 // NTP Time setup (Denmark - CEST UTC+2)
 WiFiUDP ntpUDP;
