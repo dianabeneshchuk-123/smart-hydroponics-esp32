@@ -45,7 +45,7 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature waterSensor(&oneWire);
 
 // HC-SR04 Ultrasonic Distance Sensor
-const int trigPin = 12; // Ping sender
+const int trigPin = 27; // Ping sender
 const int echoPin = 14; // Ping listener
 
 unsigned long previousMillis = 0;
