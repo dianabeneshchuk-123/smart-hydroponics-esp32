@@ -1,27 +1,29 @@
 #include <Arduino.h>
 #include <FastLED.h>
-#include <Wire.h>                 // Необхідно для роботи I2C (BME280)
-#include <Adafruit_BME280.h>      // Бібліотека для датчика BME280
-#include <SPI.h>                  // Необхідно для роботи SPI (TFT екран)
+#include <Wire.h>
+#include <Adafruit_BME280.h>
+#include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
 #include <WiFi.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
+#include <OneWire.h>            // Required for DS18B20
+#include <DallasTemperature.h>  // Required for DS18B20
 
 // ==========================================
-// НАЛАШТУВАННЯ WI-FI
+// WI-FI CONFIGURATION
 // ==========================================
-const char* ssid     = "RASPBERRYNET";     // Назва шкільного Wi-Fi
-const char* password = "VerySecret"; // Пароль від Wi-Fi
+const char* ssid     = "YOUR_WIFI_NAME";
+const char* password = "YOUR_WIFI_PASSWORD";
 
-// Налаштування часу NTP
+// NTP Time setup (Denmark - CEST UTC+2)
 WiFiUDP ntpUDP;
-time_t timeOffset = 7200; // UTC+2 (Літній час в Україні/Данії)
+time_t timeOffset = 7200; 
 NTPClient timeClient(ntpUDP, "pool.ntp.org", timeOffset); 
 
 // ==========================================
-// НАЛАШТУВАННЯ АДРЕСНОЇ СТРІЧКИ
+// LED STRIP CONFIGURATION
 // ==========================================
 #define LED_PIN     32
 #define NUM_LEDS     60
@@ -30,16 +32,21 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", timeOffset);
 CRGB leds[NUM_LEDS];
 
 // ==========================================
-// НАЛАШТУВАННЯ ДАТЧИКА BME280 (I2C)
+// CLIMATE SENSORS CONFIGURATION
 // ==========================================
-// Піни SDA(21) та SCL(22) використовуються платою автоматично
+// BME280 (I2C)
 Adafruit_BME280 bme; 
 
+// DS18B20 Water Temperature Sensor
+#define ONE_WIRE_BUS 5 // Yellow wire connected to GPIO 5
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature waterSensor(&oneWire);
+
 unsigned long previousMillis = 0;
-const long interval = 2000; // Опитування датчика кожні 2 секунди
+const long interval = 2000; // Update all sensors every 2 seconds
 
 // ==========================================
-// НАЛАШТУВАННЯ TFT ЕКРАНА (SPI)
+// TFT DISPLAY CONFIGURATION (SPI)
 // ==========================================
 #define TFT_CS   15
 #define TFT_DC   16
@@ -47,25 +54,25 @@ const long interval = 2000; // Опитування датчика кожні 2 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 
 // ==========================================
-// ПІНИ СИСТЕМИ (РЕЛЕ ТА КНОПКА)
+// SYSTEM PINS
 // ==========================================
 const int lightSensorPin = 34; 
-const int relay1Pin = 25;      // Реле 1: Світло
-const int buttonPin = 33;      // Кнопка помпи
-const int relay2Pin = 26;      // Реле 2: Водяна помпа
+const int relay1Pin = 25;      // Light
+const int buttonPin = 33;      // Pump button
+const int relay2Pin = 26;      // Pump
 
 int threshold = 2000; 
-float t = 0.0, h = 0.0;
+float airTemp = 0.0, airHum = 0.0, waterTemp = 0.0;
 String lightStatus = "OFF";
 String pumpStatus = "OFF";
 
-// Функція оновлення інформації на екрані
+// Function to update the TFT screen
 void updateDisplay() {
   tft.setTextSize(2);
-  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-
-  // 1. Вивід часу
+  
+  // 1. Time
   tft.setCursor(10, 10);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.print("Time: ");
   tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
   tft.print(timeClient.getHours());
@@ -75,27 +82,39 @@ void updateDisplay() {
   tft.print(mins);
   tft.print("   "); 
   
-  // 2. Вивід клімату з BME280
+  // 2. Room Climate (BME280)
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-  tft.setCursor(10, 45);
-  tft.print("Temp: ");
-  tft.print(t, 1); 
+  tft.setCursor(10, 40);
+  tft.print("Air T: ");
+  tft.print(airTemp, 1); 
   tft.print(" C "); 
   
-  tft.setCursor(10, 75);
-  tft.print("Hum:  ");
-  tft.print(h, 1); 
+  tft.setCursor(10, 70);
+  tft.print("Air H: ");
+  tft.print(airHum, 1); 
   tft.print(" % ");
 
-  // 3. Статус світла
-  tft.setCursor(10, 120);
+  // 3. Water Temperature (DS18B20)
+  tft.setCursor(10, 100);
+  tft.print("Wat T: ");
+  // Highlight water temp in cyan for visual distinction
+  tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
+  if (waterTemp == -127.00) {
+     tft.print("ERR  "); // Show error if sensor is disconnected
+  } else {
+     tft.print(waterTemp, 1); 
+     tft.print(" C ");
+  }
+
+  // 4. System Statuses
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setCursor(10, 150);
   tft.print("Light: ");
   if (lightStatus == "ON ") tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
   else tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
   tft.print(lightStatus);
 
-  // 4. Статус помпи
-  tft.setCursor(10, 150);
+  tft.setCursor(10, 180);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
   tft.print("Pump:  ");
   if (pumpStatus == "ON ") tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
@@ -106,38 +125,29 @@ void updateDisplay() {
 void setup() {
   Serial.begin(115200); 
 
-  // Ініціалізація екрана
   tft.begin();
   tft.setRotation(1); 
   tft.fillScreen(ILI9341_BLACK); 
   tft.setTextSize(2);
   tft.setTextColor(ILI9341_WHITE);
   
-  // Ініціалізація датчика BME280
-  // 0x76 - це стандартна адреса більшості китайських модулів BME280.
-  // Якщо датчик не знайдено, спробуйте змінити адресу на 0x77
   if (!bme.begin(0x76)) {
-    Serial.println("Помилка! Не вдалося знайти датчик BME280!");
-    tft.setTextColor(ILI9341_RED);
-    tft.print("BME280 Sensor Error!");
-    while (1) delay(10); // Зупиняємо систему, якщо датчик підключено неправильно
+    Serial.println("Error! BME280 sensor not found!");
   }
+
+  // Initialize Water Sensor
+  waterSensor.begin();
 
   tft.setCursor(10, 30);
   tft.print("Connecting to Wi-Fi...");
   
-  // Підключення до Wi-Fi
   WiFi.begin(ssid, password);
   int connectionTimeout = 0;
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
     tft.print(".");
     connectionTimeout++;
-    if(connectionTimeout > 20) { 
-      tft.setCursor(10, 60); 
-      connectionTimeout = 0; 
-    }
+    if(connectionTimeout > 20) { tft.setCursor(10, 60); connectionTimeout = 0; }
   }
   
   tft.fillScreen(ILI9341_BLACK);
@@ -146,17 +156,14 @@ void setup() {
   tft.print("Wi-Fi Connected!");
   delay(1000);
 
-  // Запуск клієнта часу
   timeClient.begin();
   
-  // Налаштування реле та кнопки
   pinMode(relay1Pin, OUTPUT);
   digitalWrite(relay1Pin, HIGH); 
   pinMode(buttonPin, INPUT_PULLUP); 
   pinMode(relay2Pin, OUTPUT);
   digitalWrite(relay2Pin, LOW);     
 
-  // Налаштування FastLED
   FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(150); 
 
@@ -169,20 +176,24 @@ void loop() {
   unsigned long currentMillis = millis();
 
   // ==========================================
-  // ЧАСТИНА 1: ЗЧИТУВАННЯ КЛІМАТУ З BME280
+  // PART 1: SENSOR READINGS
   // ==========================================
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis; 
     
-    // Зчитуємо нові дані з BME280
-    t = bme.readTemperature();
-    h = bme.readHumidity();
+    // Read Air Climate
+    airTemp = bme.readTemperature();
+    airHum = bme.readHumidity();
+
+    // Read Water Temperature
+    waterSensor.requestTemperatures(); 
+    waterTemp = waterSensor.getTempCByIndex(0);
     
     updateDisplay(); 
   }
 
   // ==========================================
-  // ЧАСТИНА 2: ЛОГІКА ДАТЧИКА СВІТЛА
+  // PART 2: LOGIC
   // ==========================================
   int lightValue = analogRead(lightSensorPin);
   String oldLightStatus = lightStatus;
@@ -209,9 +220,6 @@ void loop() {
     updateDisplay();
   }
 
-  // ==========================================
-  // ЧАСТИНА 3: РУЧНИЙ ПОЛИВ (КНОПКА)
-  // ==========================================
   int buttonState = digitalRead(buttonPin); 
   if (buttonState == LOW) {
     pumpStatus = "ON ";
