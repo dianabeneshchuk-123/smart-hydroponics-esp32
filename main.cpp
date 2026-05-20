@@ -11,8 +11,8 @@
 // ==========================================
 // WI-FI NETWORK CONFIGURATION
 // ==========================================
-const char* ssid     = "YOUR_WIFI_NAME";     // Put school Wi-Fi name here
-const char* password = "YOUR_WIFI_PASSWORD"; // Put school Wi-Fi password here
+const char* ssid     = "RASPBERRYNET";     // Put school Wi-Fi name here
+const char* password = "VerySecret"; // Put school Wi-Fi password here
 
 // NTP (Time Server) Settings
 WiFiUDP ntpUDP;
