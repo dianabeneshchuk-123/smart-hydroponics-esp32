@@ -1,92 +1,112 @@
 #include <Arduino.h>
 #include <FastLED.h>
+#include <DHT.h> // Підключаємо бібліотеку для датчика клімату
 
 // ==========================================
-// НАЛАШТУВАННЯ СТРІЧКИ (З вашого робочого коду)
+// НАЛАШТУВАННЯ СТРІЧКИ
 // ==========================================
-#define LED_PIN     32       // Зелений дріт
-#define NUM_LEDS     60    // Кількість діодів (можете змінити під ваш шматок)
-#define LED_TYPE    WS2813   // Протокол
+#define LED_PIN     32
+#define NUM_LEDS     60
+#define LED_TYPE    WS2813
 #define COLOR_ORDER GRB
 CRGB leds[NUM_LEDS];
 
 // ==========================================
+// НАЛАШТУВАННЯ DHT22 (КЛІМАТ)
+// ==========================================
+#define DHTPIN 4          // Пін, до якого підключено DATA датчика
+#define DHTTYPE DHT22     // Вказуємо тип датчика (DHT22 або DHT11)
+DHT dht(DHTPIN, DHTTYPE); // Створюємо об'єкт датчика
+
+unsigned long previousMillis = 0; // Змінна для зберігання часу останнього опитування
+const long interval = 2000;       // Інтервал опитування: 2000 мілісекунд (2 секунди)
+
+// ==========================================
 // ПІНИ СИСТЕМИ
 // ==========================================
-// Світло
 const int lightSensorPin = 34; 
-const int relay1Pin = 25;      // Реле 1 (Світло) - у вашому коді було relayPin
+const int relay1Pin = 25;      // Світло
+const int buttonPin = 33;      // Кнопка
+const int relay2Pin = 26;      // Помпа
 
-// Помпа та Кнопка (Додано)
-const int buttonPin = 33;      // Пін для Кнопки ручного поливу
-const int relay2Pin = 26;      // Пін для Реле 2 (Водяна помпа)
-
-// НОВИЙ ПОРІГ: Якщо значення перевалить за 2000 (стане темно) - вмикаємо!
 int threshold = 2000; 
 
 void setup() {
   Serial.begin(115200); 
 
-  // --- Налаштування світла ---
-  pinMode(relay1Pin, OUTPUT);
-  digitalWrite(relay1Pin, HIGH); // На старті стрічка вимкнена
+  // Ініціалізація датчика клімату
+  dht.begin();
 
-  // --- Налаштування помпи та кнопки ---
-  pinMode(buttonPin, INPUT_PULLUP); // Внутрішній резистор для кнопки
+  // Налаштування світла
+  pinMode(relay1Pin, OUTPUT);
+  digitalWrite(relay1Pin, HIGH); 
+
+  // Налаштування помпи та кнопки
+  pinMode(buttonPin, INPUT_PULLUP); 
   pinMode(relay2Pin, OUTPUT);
-  digitalWrite(relay2Pin, LOW);     // На старті помпа вимкнена
+  digitalWrite(relay2Pin, LOW);     
 
   // Ініціалізація FastLED
   FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
-  FastLED.setBrightness(150); // Яскравість (0-255)
+  FastLED.setBrightness(150); 
 
-  Serial.println("Система готова! Чекаю на темряву та натискання кнопки...");
+  Serial.println("Система готова! Датчик клімату запущено.");
 }
 
 void loop() {
   // ==========================================
-  // ЧАСТИНА 1: ЛОГІКА ДАТЧИКА СВІТЛА ТА СТРІЧКИ
+  // ЧАСТИНА 1: ЧИТАННЯ КЛІМАТУ КОЖНІ 2 СЕКУНДИ
+  // ==========================================
+  unsigned long currentMillis = millis(); // Дивимось на "секундомір"
+
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis; // Запам'ятовуємо час цього опитування
+
+    // Зчитуємо вологість та температуру
+    float h = dht.readHumidity();
+    float t = dht.readTemperature();
+
+    // Перевіряємо, чи не було помилки при зчитуванні
+    if (isnan(h) || isnan(t)) {
+      Serial.println("Помилка зчитування з датчика DHT!");
+    } else {
+      Serial.print("Температура: ");
+      Serial.print(t);
+      Serial.print(" °C  |  Вологість: ");
+      Serial.print(h);
+      Serial.println(" %");
+    }
+  }
+
+  // ==========================================
+  // ЧАСТИНА 2: ЛОГІКА ДАТЧИКА СВІТЛА ТА СТРІЧКИ
   // ==========================================
   int lightValue = analogRead(lightSensorPin);
 
-  Serial.print("Рівень світла: ");
-  Serial.print(lightValue);
-
-  // Якщо значення перевалить за 2000 (стане темно)
   if (lightValue > threshold) {
-    digitalWrite(relay1Pin, LOW); // Вмикаємо реле (12V)
-    delay(50); 
-
-    fill_solid(leds, NUM_LEDS, CRGB::White); // Кажемо світити білим
+    digitalWrite(relay1Pin, LOW); 
+    delay(300); // Пауза для ініціалізації чипів стрічки
+    fill_solid(leds, NUM_LEDS, CRGB::White); 
     FastLED.show();
-
-    Serial.println("  --> ТЕМНО! Реле 1 УВІМКНЕНО. Світло ГОРИТЬ!");
   } else {
-    fill_solid(leds, NUM_LEDS, CRGB::Black); // Вимикаємо діоди
+    fill_solid(leds, NUM_LEDS, CRGB::Black); 
     FastLED.show();
-
-    digitalWrite(relay1Pin, HIGH);  // Вимикаємо реле
-
-    Serial.println("  --> СВІТЛО! Реле 1 ВИМКНЕНО.");
+    delay(50); 
+    digitalWrite(relay1Pin, HIGH);  
   }
 
   // ==========================================
-  // ЧАСТИНА 2: ЛОГІКА КНОПКИ ТА ПОМПИ
+  // ЧАСТИНА 3: ЛОГІКА КНОПКИ ТА ПОМПИ
   // ==========================================
-  int buttonState = digitalRead(buttonPin); // Читаємо стан кнопки
+  int buttonState = digitalRead(buttonPin); 
   
-  // Якщо кнопку натиснуто (сигнал LOW через INPUT_PULLUP)
   if (buttonState == LOW) {
-    Serial.println("  *** Кнопку натиснуто! Запускаю помпу на 10 секунд... ***");
-    
-    digitalWrite(relay2Pin, HIGH);  // Вмикаємо друге реле (водяну помпу)
-    
-    delay(10000);                   // Чекаємо рівно 10 секунд (10 000 мілісекунд)
-    
-    digitalWrite(relay2Pin, LOW);   // Вимикаємо помпу
-    
-    Serial.println("  *** Цикл перемішування завершено. Реле помпи вимкнено. ***");
+    Serial.println(" *** Запускаю помпу на 10 секунд... ***");
+    digitalWrite(relay2Pin, HIGH);  
+    delay(10000);                   
+    digitalWrite(relay2Pin, LOW);   
+    Serial.println(" *** Цикл перемішування завершено. ***");
   }
 
-  delay(500); 
+  delay(100); // Невеличка затримка для стабільності
 }
