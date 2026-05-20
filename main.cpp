@@ -1,7 +1,8 @@
 #include <Arduino.h>
 #include <FastLED.h>
-#include <DHT.h>
-#include <SPI.h>
+#include <Wire.h>                 // Необхідно для роботи I2C (BME280)
+#include <Adafruit_BME280.h>      // Бібліотека для датчика BME280
+#include <SPI.h>                  // Необхідно для роботи SPI (TFT екран)
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
 #include <WiFi.h>
@@ -9,19 +10,18 @@
 #include <WiFiUdp.h>
 
 // ==========================================
-// WI-FI NETWORK CONFIGURATION
+// НАЛАШТУВАННЯ WI-FI
 // ==========================================
-const char* ssid     = "RASPBERRYNET";     // Put school Wi-Fi name here
-const char* password = "VerySecret"; // Put school Wi-Fi password here
+const char* ssid     = "RASPBERRYNET";     // Назва шкільного Wi-Fi
+const char* password = "VerySecret"; // Пароль від Wi-Fi
 
-// NTP (Time Server) Settings
+// Налаштування часу NTP
 WiFiUDP ntpUDP;
-// Time offset: 7200 seconds = UTC+2 (Summer time in Ukraine/Denmark)
-// Change to 3600 for Winter time (UTC+1) if needed
-NTPClient timeClient(ntpUDP, "pool.ntp.org", 7200); 
+time_t timeOffset = 7200; // UTC+2 (Літній час в Україні/Данії)
+NTPClient timeClient(ntpUDP, "pool.ntp.org", timeOffset); 
 
 // ==========================================
-// LED STRIP CONFIGURATION
+// НАЛАШТУВАННЯ АДРЕСНОЇ СТРІЧКИ
 // ==========================================
 #define LED_PIN     32
 #define NUM_LEDS     60
@@ -30,17 +30,16 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", 7200);
 CRGB leds[NUM_LEDS];
 
 // ==========================================
-// DHT22 CONFIGURATION (CLIMATE)
+// НАЛАШТУВАННЯ ДАТЧИКА BME280 (I2C)
 // ==========================================
-#define DHTPIN 4
-#define DHTTYPE DHT22
-DHT dht(DHTPIN, DHTTYPE);
+// Піни SDA(21) та SCL(22) використовуються платою автоматично
+Adafruit_BME280 bme; 
 
 unsigned long previousMillis = 0;
-const long interval = 2000; // Update sensor data every 2 seconds
+const long interval = 2000; // Опитування датчика кожні 2 секунди
 
 // ==========================================
-// TFT DISPLAY CONFIGURATION (SPI)
+// НАЛАШТУВАННЯ TFT ЕКРАНА (SPI)
 // ==========================================
 #define TFT_CS   15
 #define TFT_DC   16
@@ -48,52 +47,54 @@ const long interval = 2000; // Update sensor data every 2 seconds
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 
 // ==========================================
-// SYSTEM PINS
+// ПІНИ СИСТЕМИ (РЕЛЕ ТА КНОПКА)
 // ==========================================
 const int lightSensorPin = 34; 
-const int relay1Pin = 25;      // Relay 1: Grow Light (Strip)
-const int buttonPin = 33;      // Manual pump button
-const int relay2Pin = 26;      // Relay 2: Water Pump
+const int relay1Pin = 25;      // Реле 1: Світло
+const int buttonPin = 33;      // Кнопка помпи
+const int relay2Pin = 26;      // Реле 2: Водяна помпа
 
 int threshold = 2000; 
 float t = 0.0, h = 0.0;
 String lightStatus = "OFF";
 String pumpStatus = "OFF";
 
-// Function to refresh all data on the TFT screen without screen flickering
+// Функція оновлення інформації на екрані
 void updateDisplay() {
   tft.setTextSize(2);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
 
-  // 1. Display Current Time (Format 14:05)
+  // 1. Вивід часу
   tft.setCursor(10, 10);
   tft.print("Time: ");
   tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
   tft.print(timeClient.getHours());
   tft.print(":");
   int mins = timeClient.getMinutes();
-  if(mins < 10) tft.print("0"); // Add leading zero for minutes
+  if(mins < 10) tft.print("0"); 
   tft.print(mins);
-  tft.print("   "); // Clear potential pixel artifacts
+  tft.print("   "); 
   
-  // 2. Display Climate Data
+  // 2. Вивід клімату з BME280
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.setCursor(10, 45);
   tft.print("Temp: ");
-  if (isnan(t)) tft.print("--  "); else { tft.print(t, 1); tft.print(" C "); }
+  tft.print(t, 1); 
+  tft.print(" C "); 
   
   tft.setCursor(10, 75);
   tft.print("Hum:  ");
-  if (isnan(h)) tft.print("--  "); else { tft.print(h, 1); tft.print(" % "); }
+  tft.print(h, 1); 
+  tft.print(" % ");
 
-  // 3. Display Light Status (Changes color dynamically)
+  // 3. Статус світла
   tft.setCursor(10, 120);
   tft.print("Light: ");
   if (lightStatus == "ON ") tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
   else tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
   tft.print(lightStatus);
 
-  // 4. Display Pump Status
+  // 4. Статус помпи
   tft.setCursor(10, 150);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
   tft.print("Pump:  ");
@@ -105,17 +106,27 @@ void updateDisplay() {
 void setup() {
   Serial.begin(115200); 
 
-  // Initialize TFT Display
+  // Ініціалізація екрана
   tft.begin();
-  tft.setRotation(1); // Set landscape mode
+  tft.setRotation(1); 
   tft.fillScreen(ILI9341_BLACK); 
   tft.setTextSize(2);
   tft.setTextColor(ILI9341_WHITE);
   
+  // Ініціалізація датчика BME280
+  // 0x76 - це стандартна адреса більшості китайських модулів BME280.
+  // Якщо датчик не знайдено, спробуйте змінити адресу на 0x77
+  if (!bme.begin(0x76)) {
+    Serial.println("Помилка! Не вдалося знайти датчик BME280!");
+    tft.setTextColor(ILI9341_RED);
+    tft.print("BME280 Sensor Error!");
+    while (1) delay(10); // Зупиняємо систему, якщо датчик підключено неправильно
+  }
+
   tft.setCursor(10, 30);
   tft.print("Connecting to Wi-Fi...");
   
-  // Connect to Wi-Fi network
+  // Підключення до Wi-Fi
   WiFi.begin(ssid, password);
   int connectionTimeout = 0;
   while (WiFi.status() != WL_CONNECTED) {
@@ -123,7 +134,7 @@ void setup() {
     Serial.print(".");
     tft.print(".");
     connectionTimeout++;
-    if(connectionTimeout > 20) { // Wrap text on screen if it takes too long
+    if(connectionTimeout > 20) { 
       tft.setCursor(10, 60); 
       connectionTimeout = 0; 
     }
@@ -135,56 +146,51 @@ void setup() {
   tft.print("Wi-Fi Connected!");
   delay(1000);
 
-  // Start the NTP time client
+  // Запуск клієнта часу
   timeClient.begin();
   
-  // Initialize DHT sensor
-  dht.begin();
-  
-  // Configure light pins
+  // Налаштування реле та кнопки
   pinMode(relay1Pin, OUTPUT);
-  digitalWrite(relay1Pin, HIGH); // Light is OFF by default
-  
-  // Configure pump and button pins
+  digitalWrite(relay1Pin, HIGH); 
   pinMode(buttonPin, INPUT_PULLUP); 
   pinMode(relay2Pin, OUTPUT);
-  digitalWrite(relay2Pin, LOW);  // Pump is OFF by default   
+  digitalWrite(relay2Pin, LOW);     
 
-  // Initialize FastLED for addressable strip
+  // Налаштування FastLED
   FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(150); 
 
   tft.fillScreen(ILI9341_BLACK); 
-  updateDisplay(); // Draw the initial interface layout
+  updateDisplay(); 
 }
 
 void loop() {
-  // Always update time client from the internet
   timeClient.update();
-
   unsigned long currentMillis = millis();
 
   // ==========================================
-  // PART 1: CLIMATE READING & SCREEN REFRESH
+  // ЧАСТИНА 1: ЗЧИТУВАННЯ КЛІМАТУ З BME280
   // ==========================================
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis; 
-    h = dht.readHumidity();
-    t = dht.readTemperature();
-    updateDisplay(); // Refresh screen data every 2 seconds
+    
+    // Зчитуємо нові дані з BME280
+    t = bme.readTemperature();
+    h = bme.readHumidity();
+    
+    updateDisplay(); 
   }
 
   // ==========================================
-  // PART 2: LIGHT SENSOR & STRIP LOGIC
+  // ЧАСТИНА 2: ЛОГІКА ДАТЧИКА СВІТЛА
   // ==========================================
   int lightValue = analogRead(lightSensorPin);
   String oldLightStatus = lightStatus;
 
-  // Presentation Mode: Activates strictly based on light sensor value
   if (lightValue > threshold) {
-    if (lightStatus != "ON ") { // Prevents code from spamming FastLED commands
-      digitalWrite(relay1Pin, LOW); // Turn ON 12V relay
-      delay(300);                   // Essential startup pause for LED chips
+    if (lightStatus != "ON ") { 
+      digitalWrite(relay1Pin, LOW); 
+      delay(300);                   
       fill_solid(leds, NUM_LEDS, CRGB::White); 
       FastLED.show();
       lightStatus = "ON "; 
@@ -194,31 +200,30 @@ void loop() {
       fill_solid(leds, NUM_LEDS, CRGB::Black); 
       FastLED.show();
       delay(50); 
-      digitalWrite(relay1Pin, HIGH); // Turn OFF 12V relay 
+      digitalWrite(relay1Pin, HIGH); 
       lightStatus = "OFF";
     }
   }
 
-  // If light status changed, update display immediately for instant visual feedback
   if (oldLightStatus != lightStatus) {
     updateDisplay();
   }
 
   // ==========================================
-  // PART 3: MANUAL WATERING PUMP LOGIC
+  // ЧАСТИНА 3: РУЧНИЙ ПОЛИВ (КНОПКА)
   // ==========================================
   int buttonState = digitalRead(buttonPin); 
   if (buttonState == LOW) {
     pumpStatus = "ON ";
     updateDisplay(); 
     
-    digitalWrite(relay2Pin, HIGH);  // Turn ON pump relay
-    delay(10000);                   // Keep it running for exactly 10 seconds
-    digitalWrite(relay2Pin, LOW);   // Turn OFF pump relay
+    digitalWrite(relay2Pin, HIGH);  
+    delay(10000);                   
+    digitalWrite(relay2Pin, LOW);   
     
     pumpStatus = "OFF";
     updateDisplay(); 
   }
 
-  delay(50); // Small stability delay
+  delay(50); 
 }
