@@ -1,64 +1,92 @@
 #include <Arduino.h>
+#include <FastLED.h>
 
-// Define ESP32 pins according to your SDD specification
-const int ldrPin = 34;       // Analog pin for the light sensor (LDR)
-const int relay1Pin = 25;    // Pin for Relay 1 (Grow Light)
-const int buttonPin = 33;    // Pin for the manual watering button
-const int relay2Pin = 26;    // Pin for Relay 2 (Water Pump)
+// ==========================================
+// НАЛАШТУВАННЯ СТРІЧКИ (З вашого робочого коду)
+// ==========================================
+#define LED_PIN     32       // Зелений дріт
+#define NUM_LEDS     60    // Кількість діодів (можете змінити під ваш шматок)
+#define LED_TYPE    WS2813   // Протокол
+#define COLOR_ORDER GRB
+CRGB leds[NUM_LEDS];
+
+// ==========================================
+// ПІНИ СИСТЕМИ
+// ==========================================
+// Світло
+const int lightSensorPin = 34; 
+const int relay1Pin = 25;      // Реле 1 (Світло) - у вашому коді було relayPin
+
+// Помпа та Кнопка (Додано)
+const int buttonPin = 33;      // Пін для Кнопки ручного поливу
+const int relay2Pin = 26;      // Пін для Реле 2 (Водяна помпа)
+
+// НОВИЙ ПОРІГ: Якщо значення перевалить за 2000 (стане темно) - вмикаємо!
+int threshold = 2000; 
 
 void setup() {
-  // Start the serial monitor for debugging (baud rate 115200)
-  Serial.begin(115200);
-  
-  // Configure pins for the light sensor and relay
-  pinMode(ldrPin, INPUT);
+  Serial.begin(115200); 
+
+  // --- Налаштування світла ---
   pinMode(relay1Pin, OUTPUT);
-  
-  // Configure pins for the pump and button
-  // The magic of INPUT_PULLUP saves us from needing an external resistor!
-  pinMode(buttonPin, INPUT_PULLUP); 
+  digitalWrite(relay1Pin, HIGH); // На старті стрічка вимкнена
+
+  // --- Налаштування помпи та кнопки ---
+  pinMode(buttonPin, INPUT_PULLUP); // Внутрішній резистор для кнопки
   pinMode(relay2Pin, OUTPUT);
-  
-  // Turn off both relays at system startup (to prevent unexpected activation)
-  // Note: some relay modules turn ON with LOW and OFF with HIGH. 
-  // If your relay works the opposite way, simply swap LOW and HIGH below.
-  digitalWrite(relay1Pin, LOW);
-  digitalWrite(relay2Pin, LOW);
-  
-  Serial.println("Hydroponic System is ready! Waiting for sensors and button...");
+  digitalWrite(relay2Pin, LOW);     // На старті помпа вимкнена
+
+  // Ініціалізація FastLED
+  FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
+  FastLED.setBrightness(150); // Яскравість (0-255)
+
+  Serial.println("Система готова! Чекаю на темряву та натискання кнопки...");
 }
 
 void loop() {
   // ==========================================
-  // PART 1: LIGHT SENSOR LOGIC
+  // ЧАСТИНА 1: ЛОГІКА ДАТЧИКА СВІТЛА ТА СТРІЧКИ
   // ==========================================
-  int lightValue = analogRead(ldrPin); // Read the ambient light level (from 0 to 4095)
-  
-  // If it is dark (threshold depends on room lighting, let's assume < 2000)
-  if (lightValue < 2000) {
-    digitalWrite(relay1Pin, HIGH); // Turn ON the grow light
+  int lightValue = analogRead(lightSensorPin);
+
+  Serial.print("Рівень світла: ");
+  Serial.print(lightValue);
+
+  // Якщо значення перевалить за 2000 (стане темно)
+  if (lightValue > threshold) {
+    digitalWrite(relay1Pin, LOW); // Вмикаємо реле (12V)
+    delay(50); 
+
+    fill_solid(leds, NUM_LEDS, CRGB::White); // Кажемо світити білим
+    FastLED.show();
+
+    Serial.println("  --> ТЕМНО! Реле 1 УВІМКНЕНО. Світло ГОРИТЬ!");
   } else {
-    digitalWrite(relay1Pin, LOW);  // Turn OFF the grow light
+    fill_solid(leds, NUM_LEDS, CRGB::Black); // Вимикаємо діоди
+    FastLED.show();
+
+    digitalWrite(relay1Pin, HIGH);  // Вимикаємо реле
+
+    Serial.println("  --> СВІТЛО! Реле 1 ВИМКНЕНО.");
   }
 
   // ==========================================
-  // PART 2: BUTTON AND PUMP LOGIC (MIXER)
+  // ЧАСТИНА 2: ЛОГІКА КНОПКИ ТА ПОМПИ
   // ==========================================
-  int buttonState = digitalRead(buttonPin); // Read the current state of the button
+  int buttonState = digitalRead(buttonPin); // Читаємо стан кнопки
   
-  // Since we used INPUT_PULLUP, a pressed button gives a LOW signal
+  // Якщо кнопку натиснуто (сигнал LOW через INPUT_PULLUP)
   if (buttonState == LOW) {
-    Serial.println("Button pressed! Starting the pump for 10 seconds...");
+    Serial.println("  *** Кнопку натиснуто! Запускаю помпу на 10 секунд... ***");
     
-    digitalWrite(relay2Pin, HIGH);  // Turn ON the second relay (water pump)
+    digitalWrite(relay2Pin, HIGH);  // Вмикаємо друге реле (водяну помпу)
     
-    delay(10000);                   // Wait exactly 10 seconds (10,000 milliseconds)
+    delay(10000);                   // Чекаємо рівно 10 секунд (10 000 мілісекунд)
     
-    digitalWrite(relay2Pin, LOW);   // Turn OFF the water pump
+    digitalWrite(relay2Pin, LOW);   // Вимикаємо помпу
     
-    Serial.println("Mixing cycle completed. Relay turned off.");
+    Serial.println("  *** Цикл перемішування завершено. Реле помпи вимкнено. ***");
   }
-  
-  // Short delay for microcontroller stability
-  delay(100);
+
+  delay(500); 
 }
