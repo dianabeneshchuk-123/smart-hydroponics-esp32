@@ -16,8 +16,8 @@
 // ==========================================
 // WI-FI & THINGSBOARD KONFIGURATION
 // ==========================================
-const char* ssid     = "YOUR_WIFI_NAME";     // <--- ВПИШІТЬ ВАШ WI-FI
-const char* password = "YOUR_WIFI_PASSWORD"; // <--- ВПИШІТЬ ПАРОЛЬ
+const char* ssid     = "RASPBERRYNE";     // <--- ВПИШІТЬ ВАШ WI-FI
+const char* password = "VerySecret"; // <--- ВПИШІТЬ ПАРОЛЬ
 
 #define TOKEN "XZE8jljP8NUnN5TQFIRZ"         // Dit ThingsBoard Access Token
 const char* mqtt_server = "thingsboard.cloud";
