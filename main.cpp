@@ -1,29 +1,30 @@
 #include <Arduino.h>
 #include <FastLED.h>
-#include <Wire.h>                 // Required for I2C (BME280)
-#include <Adafruit_BME280.h>      // BME280 sensor library
-#include <SPI.h>                  // Required for SPI (TFT Display)
+#include <Wire.h>                 // Kræves til I2C (BME280)
+#include <Adafruit_BME280.h>      // BME280 sensorbibliotek
+#include <SPI.h>                  // Kræves til SPI (TFT-skærm)
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
 #include <WiFi.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
-#include <OneWire.h>              // Required for DS18B20
-#include <DallasTemperature.h>    // Required for DS18B20
+#include <OneWire.h>              // Kræves til DS18B20
+#include <DallasTemperature.h>    // Kræves til DS18B20
+#include <time.h>                 // Tilføjet til håndtering af dato
 
 // ==========================================
-// WI-FI CONFIGURATION
+// WI-FI KONFIGURATION
 // ==========================================
 const char* ssid     = "RASPBERRYNET";     
 const char* password = "VerySecret"; 
 
-// NTP Time setup specifically for Denmark
+// NTP Tidsindstilling specifikt for Danmark
 WiFiUDP ntpUDP;
-time_t timeOffset = 7200; // UTC+2 (Denmark Summer Time)
+time_t timeOffset = 7200; // UTC+2 (Dansk sommertid)
 NTPClient timeClient(ntpUDP, "pool.ntp.org", timeOffset); 
 
 // ==========================================
-// LED STRIP CONFIGURATION
+// KONFIGURATION AF LED-BÅND
 // ==========================================
 #define LED_PIN     32
 #define NUM_LEDS     60
@@ -32,23 +33,24 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", timeOffset);
 CRGB leds[NUM_LEDS];
 
 // ==========================================
-// SENSORS CONFIGURATION
+// KONFIGURATION AF SENSORER
 // ==========================================
-Adafruit_BME280 bme; 
+Adafruit_BME280 bme; // BME280 (Luftklima)
 
 #define ONE_WIRE_BUS 5 
 OneWire oneWire(ONE_WIRE_BUS);
-DallasTemperature waterSensor(&oneWire);
+DallasTemperature waterSensor(&oneWire); // DS18B20 (Vandtemperatur)
 
-// HC-SR04 (Water Level)
+// HC-SR04 (Vandstand)
 const int trigPin = 27; 
 const int echoPin = 14; 
 
 unsigned long previousMillis = 0;
-const long interval = 2000; // Update sensor data every 2 seconds
+const long interval = 2000; // Opdater sensorer hvert 2. sekund
+int lastSecond = -1;        // Til sporing af sekundændringer
 
 // ==========================================
-// TFT DISPLAY CONFIGURATION (SPI)
+// KONFIGURATION AF TFT-SKÆRM (SPI)
 // ==========================================
 #define TFT_CS   15
 #define TFT_DC   16
@@ -56,96 +58,106 @@ const long interval = 2000; // Update sensor data every 2 seconds
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 
 // ==========================================
-// SYSTEM PINS (RELAYS & BUTTON)
+// SYSTEMPINS (RELÆER OG KNAP)
 // ==========================================
-const int lightSensorPin = 34; 
-const int relay1Pin = 25;      // Relay 1: Grow Light
-const int relay2Pin = 26;      // Relay 2: Water Pump
-const int buttonPin = 33;      // Manual top-up button
+const int lightSensorPin = 34; // Lyssensor
+const int relay1Pin = 25;      // Relæ 1: Vækstlys
+const int relay2Pin = 26;      // Relæ 2: Vandpumpe
+const int buttonPin = 33;      // Knap til manuel opfyldning
 
 int threshold = 2000; 
 float airTemp = 0.0, airHum = 0.0, waterTemp = 0.0;
 
-// CALIBRATION VARIABLES (11-Liter Tank)
 int waterDistance = 0; 
 int waterPercent = 0; 
 
 String lightStatus = "OFF";
 String waterPumpStatus = "OFF";
-String airPumpStatus = "ON ";  // Manual 230V Pump in 11L tank
+String airPumpStatus = "ON ";  // Manuel 230V pumpe i 11L tank
 
-// Function to refresh the information on the TFT screen
+// ==========================================
+// FUNKTION TIL AT TEGNE DASHBOARDET
+// ==========================================
 void updateDisplay() {
   tft.setTextSize(2);
   
-  // 1. Time
+  // --- 1. HEADER: DATO OG TID ---
+  time_t rawtime = timeClient.getEpochTime();
+  struct tm * ti = localtime(&rawtime);
+  
+  char dateBuffer[15];
+  sprintf(dateBuffer, "%02d/%02d/%04d", ti->tm_mday, ti->tm_mon + 1, ti->tm_year + 1900);
+  
   tft.setCursor(10, 10);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-  tft.print("Time: ");
+  tft.print(dateBuffer);
+  tft.print("  ");
   tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
-  tft.print(timeClient.getHours());
-  tft.print(":");
-  int mins = timeClient.getMinutes();
-  if(mins < 10) tft.print("0"); 
-  tft.print(mins);
-  tft.print("   "); 
+  tft.print(timeClient.getFormattedTime()); // Giver automatisk TT:MM:SS
   
-  // 2. Air Climate
-  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-  tft.setCursor(10, 40);
-  tft.print("Air T: "); tft.print(airTemp, 1); tft.print(" C "); 
-  tft.setCursor(10, 65);
-  tft.print("Air H: "); tft.print(airHum, 1); tft.print(" % ");
-
-  // 3. Water Temperature
-  tft.setCursor(10, 95);
-  tft.print("Wat T: ");
-  tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
-  if (waterTemp == -127.00) tft.print("ERR  "); 
-  else { tft.print(waterTemp, 1); tft.print(" C "); }
-
-  // 4. Water Level (%)
-  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-  tft.setCursor(10, 120);
-  tft.print("Level: ");
+  // --- 2. BLOK: KLIMA (Venstre kolonne) ---
+  tft.setCursor(10, 50); 
+  tft.setTextColor(ILI9341_LIGHTGREY, ILI9341_BLACK); 
+  tft.print("AIR:");
   
-  if (waterPercent <= 10) tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
+  tft.setCursor(10, 75); 
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
+  tft.print("T: "); tft.print(airTemp, 1); tft.print("C  ");
+  
+  tft.setCursor(10, 100); 
+  tft.print("H: "); tft.print(airHum, 1); tft.print("%  ");
+
+  // --- 3. BLOK: VAND (Højre kolonne) ---
+  tft.setCursor(160, 50); 
+  tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK); 
+  tft.print("WATER:");
+  
+  tft.setCursor(160, 75); 
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
+  tft.print("T: "); 
+  if (waterTemp == -127.00) tft.print("ERR "); 
+  else { tft.print(waterTemp, 1); tft.print("C  "); }
+
+  tft.setCursor(160, 100); 
+  tft.print("L: "); 
+  if (waterPercent <= 10) tft.setTextColor(ILI9341_RED, ILI9341_BLACK); 
   else tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
-  tft.print(waterPercent); tft.print("%    ");
+  tft.print(waterPercent); tft.print("%   ");
 
-  // Critical Low Water Warning
-  tft.setCursor(10, 138);
+  // Tankens status (med farvet baggrund til alarm)
+  tft.setCursor(160, 125);
   if (waterPercent <= 10) {
-    tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
-    tft.print("! LOW WATER !");
+    tft.setTextColor(ILI9341_WHITE, ILI9341_RED); // Hvid tekst på rød baggrund
+    tft.print(" LOW WATER ");
   } else {
-    tft.print("             "); // Clear warning line if OK
+    tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK); // Grøn tekst på sort baggrund
+    tft.print("[LEVEL OK]");
   }
 
-  // 5. System Statuses
-  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-  
-  // Light
-  tft.setCursor(10, 160);
-  tft.print("Light:  ");
+  // --- 4. BLOK: SYSTEMSTATUS ---
+  tft.setCursor(10, 160); 
+  tft.setTextColor(ILI9341_ORANGE, ILI9341_BLACK); 
+  tft.print("SYSTEM STATUS:");
+
+  tft.setCursor(10, 190); 
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
+  tft.print("Light : ");
   if (lightStatus == "ON ") tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
   else tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
   tft.print(lightStatus);
 
-  // Water Pump
-  tft.setCursor(10, 185);
+  tft.setCursor(170, 190); 
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
+  tft.print("A-Pump: ");
+  tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK); 
+  tft.print(airPumpStatus);
+
+  tft.setCursor(10, 215); 
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
   tft.print("W-Pump: ");
   if (waterPumpStatus == "ON ") tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
   else tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
   tft.print(waterPumpStatus);
-
-  // Air Pump (Always ON status visual)
-  tft.setCursor(10, 210);
-  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
-  tft.print("A-Pump: ");
-  tft.setTextColor(ILI9341_ORANGE, ILI9341_BLACK);
-  tft.print(airPumpStatus);
 }
 
 void setup() {
@@ -173,15 +185,19 @@ void setup() {
     connectionTimeout++;
     if(connectionTimeout > 20) break; 
   }
+  
+  // Tegner statisk dashboard-grafik KUN ÉN GANG for at forhindre flimren
   tft.fillScreen(ILI9341_BLACK);
+  tft.drawFastHLine(0, 35, 320, ILI9341_DARKGREY);   // Linje under uret
+  tft.drawFastHLine(0, 150, 320, ILI9341_DARKGREY);  // Linje over status
+  tft.drawFastVLine(150, 35, 115, ILI9341_DARKGREY); // Lodret linje mellem luft og vand
   
   timeClient.begin();
   
-  // Initialize Relays (ACTIVE LOW LOGIC)
-  digitalWrite(relay1Pin, HIGH); // Grow Light OFF
+  digitalWrite(relay1Pin, HIGH); 
   pinMode(relay1Pin, OUTPUT);
   
-  digitalWrite(relay2Pin, HIGH); // Water Pump OFF 
+  digitalWrite(relay2Pin, HIGH); 
   pinMode(relay2Pin, OUTPUT);
 
   pinMode(buttonPin, INPUT_PULLUP); 
@@ -195,10 +211,15 @@ void setup() {
 void loop() {
   timeClient.update();
   unsigned long currentMillis = millis();
+  bool displayNeedsUpdate = false; // Flag til smart opdatering af skærmen
 
-  // ==========================================
-  // PART 1: SENSOR READINGS (Every 2 seconds)
-  // ==========================================
+  // 1. KONTROL AF UR (Hvert sekund)
+  if (timeClient.getSeconds() != lastSecond) {
+    lastSecond = timeClient.getSeconds();
+    displayNeedsUpdate = true; // Sekundet er skiftet - skærmen skal opdateres
+  }
+
+  // 2. KONTROL AF SENSORER (Hvert 2. sekund)
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis; 
     
@@ -208,7 +229,6 @@ void loop() {
     waterSensor.requestTemperatures(); 
     waterTemp = waterSensor.getTempCByIndex(0);
 
-    // Ultrasonic pulse
     digitalWrite(trigPin, LOW);
     delayMicroseconds(2);
     digitalWrite(trigPin, HIGH);
@@ -218,28 +238,21 @@ void loop() {
     long duration = pulseIn(echoPin, HIGH);
     waterDistance = duration * 0.034 / 2; 
     
-    // Convert cm to percentage based on calibration:
-    // 10 cm or more = 0% (Critical Low)
-    // 5 cm or less = 100% (Tank Full)
     waterPercent = map(waterDistance, 10, 5, 0, 100);
     if (waterPercent > 100) waterPercent = 100;
     if (waterPercent < 0) waterPercent = 0;
     
-    updateDisplay(); 
+    displayNeedsUpdate = true; // Nye data er læst - skærmen skal opdateres
   }
 
-  // ==========================================
-  // PART 2: SYSTEM LOGIC
-  // ==========================================
-  
-  // 1. Grow Light Logic
+  // 3. SYSTEMLOGIK
   int lightValue = analogRead(lightSensorPin);
   String oldLightStatus = lightStatus;
 
   if (lightValue > threshold) {
     if (lightStatus != "ON ") { 
-      digitalWrite(relay1Pin, LOW);            // Turn ON Relay 1
-      delay(150);                              // Wait for strip power stabilization
+      digitalWrite(relay1Pin, LOW);            
+      delay(150);                              
       fill_solid(leds, NUM_LEDS, CRGB::White); 
       FastLED.show();
       lightStatus = "ON "; 
@@ -249,36 +262,34 @@ void loop() {
       fill_solid(leds, NUM_LEDS, CRGB::Black); 
       FastLED.show();
       delay(50);                               
-      digitalWrite(relay1Pin, HIGH);           // Turn OFF Relay 1
+      digitalWrite(relay1Pin, HIGH);           
       lightStatus = "OFF";
     }
   }
-  if (oldLightStatus != lightStatus) updateDisplay();
+  if (oldLightStatus != lightStatus) displayNeedsUpdate = true;
 
-  // 2 & 3. Water Pump Logic (Auto-Top-Off + Manual Button)
   int buttonState = digitalRead(buttonPin); 
   String oldPumpStatus = waterPumpStatus;
 
   if (buttonState == LOW) {
-    // MANUAL OVERRIDE: Pump runs as long as you hold the physical button
-    digitalWrite(relay2Pin, LOW);   // Turn ON pump
+    digitalWrite(relay2Pin, LOW);   
     waterPumpStatus = "ON ";
   } else {
-    // AUTOMATIC SENSOR-BASED MODE (Hysteresis Corridor)
     if (waterDistance >= 10) {      
-      // Distance is 10cm or more (Water depth is <= 4cm -> 0%)
-      digitalWrite(relay2Pin, LOW); // Turn ON pump to start filling
+      digitalWrite(relay2Pin, LOW); 
       waterPumpStatus = "ON ";
     } 
     else if (waterDistance <= 5) {  
-      // Distance is 5cm or less (Water depth is >= 9cm -> 100%)
-      digitalWrite(relay2Pin, HIGH); // Turn OFF pump, container is full
+      digitalWrite(relay2Pin, HIGH); 
       waterPumpStatus = "OFF";
     }
-    // If distance is between 5cm and 10cm, it safely maintains its current state
   }
-  
-  if (oldPumpStatus != waterPumpStatus) updateDisplay();
+  if (oldPumpStatus != waterPumpStatus) displayNeedsUpdate = true;
+
+  // 4. OPDATERING AF SKÆRM (Kun hvis noget er ændret)
+  if (displayNeedsUpdate) {
+    updateDisplay();
+  }
 
   delay(50); 
 }
