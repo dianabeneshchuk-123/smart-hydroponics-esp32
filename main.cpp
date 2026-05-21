@@ -8,19 +8,18 @@
 #include <WiFi.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
-#include <OneWire.h>            // Required for DS18B20
-#include <DallasTemperature.h>  // Required for DS18B20
+#include <OneWire.h>              // Required for DS18B20
+#include <DallasTemperature.h>    // Required for DS18B20
 
 // ==========================================
 // WI-FI CONFIGURATION
 // ==========================================
-const char* ssid     = "RASPBERRYNET";     // Put school Wi-Fi name here
-const char* password = "VerySecret"; // Put school Wi-Fi password here
+const char* ssid     = "RASPBERRYNET";     
+const char* password = "VerySecret"; 
 
 // NTP Time setup specifically for Denmark
 WiFiUDP ntpUDP;
 // Time offset: 7200 seconds = UTC+2 (Summer time / CEST in Denmark)
-// Note: Change to 3600 for Winter time (UTC+1 / CET)
 time_t timeOffset = 7200; 
 NTPClient timeClient(ntpUDP, "pool.ntp.org", timeOffset); 
 
@@ -34,19 +33,19 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", timeOffset);
 CRGB leds[NUM_LEDS];
 
 // ==========================================
-// CLIMATE & WATER SENSORS CONFIGURATION
+// SENSORS CONFIGURATION
 // ==========================================
-// BME280 (I2C) - Uses GPIO21 (SDA) and GPIO22 (SCL) automatically
+// BME280 (Air Climate)
 Adafruit_BME280 bme; 
 
-// DS18B20 Water Temperature Sensor (One-Wire)
-#define ONE_WIRE_BUS 5 // Yellow wire connected to GPIO 5
+// DS18B20 (Water Temperature)
+#define ONE_WIRE_BUS 5 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature waterSensor(&oneWire);
 
-// HC-SR04 Ultrasonic Distance Sensor
-const int trigPin = 27; // Ping sender
-const int echoPin = 14; // Ping listener
+// HC-SR04 (Water Level)
+const int trigPin = 27; 
+const int echoPin = 14; 
 
 unsigned long previousMillis = 0;
 const long interval = 2000; // Update sensor data every 2 seconds
@@ -64,14 +63,15 @@ Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 // ==========================================
 const int lightSensorPin = 34; 
 const int relay1Pin = 25;      // Relay 1: Grow Light
-const int buttonPin = 33;      // Pump button
 const int relay2Pin = 26;      // Relay 2: Water Pump
+const int buttonPin = 33;      // Water Pump manual button
 
 int threshold = 2000; 
 float airTemp = 0.0, airHum = 0.0, waterTemp = 0.0;
-int waterDistance = 0; // Stores distance in cm
+int waterDistance = 0; 
 String lightStatus = "OFF";
-String pumpStatus = "OFF";
+String waterPumpStatus = "OFF";
+String airPumpStatus = "ON ";  // Assuming Air Pump is plugged straight into 230V
 
 // Function to refresh the information on the TFT screen
 void updateDisplay() {
@@ -87,116 +87,99 @@ void updateDisplay() {
   int mins = timeClient.getMinutes();
   if(mins < 10) tft.print("0"); 
   tft.print(mins);
-  tft.print("   "); // Clear artifacts
+  tft.print("   "); 
   
-  // 2. Room Climate (BME280)
+  // 2. Air Climate
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.setCursor(10, 40);
-  tft.print("Air T: ");
-  tft.print(airTemp, 1); 
-  tft.print(" C "); 
-  
-  tft.setCursor(10, 70);
-  tft.print("Air H: ");
-  tft.print(airHum, 1); 
-  tft.print(" % ");
+  tft.print("Air T: "); tft.print(airTemp, 1); tft.print(" C "); 
+  tft.setCursor(10, 65);
+  tft.print("Air H: "); tft.print(airHum, 1); tft.print(" % ");
 
-  // 3. Water Stats (Temp & Level)
-  tft.setCursor(10, 100);
+  // 3. Water Stats
+  tft.setCursor(10, 95);
   tft.print("Wat T: ");
-  // Highlight water temperature in cyan
   tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
-  if (waterTemp == -127.00) {
-     tft.print("ERR  "); 
-  } else {
-     tft.print(waterTemp, 1); 
-     tft.print(" C ");
-  }
+  if (waterTemp == -127.00) tft.print("ERR  "); 
+  else { tft.print(waterTemp, 1); tft.print(" C "); }
 
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-  tft.setCursor(10, 130);
+  tft.setCursor(10, 120);
   tft.print("Level: ");
-  // Highlight water level in green
   tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
-  tft.print(waterDistance);
-  tft.print(" cm  "); // Clear artifacts
+  tft.print(waterDistance); tft.print(" cm  ");
 
   // 4. System Statuses
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-  tft.setCursor(10, 170);
-  tft.print("Light: ");
+  
+  // Light
+  tft.setCursor(10, 155);
+  tft.print("Light:  ");
   if (lightStatus == "ON ") tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
   else tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
   tft.print(lightStatus);
 
-  tft.setCursor(10, 200);
+  // Water Pump
+  tft.setCursor(10, 180);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
-  tft.print("Pump:  ");
-  if (pumpStatus == "ON ") tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
+  tft.print("W-Pump: ");
+  if (waterPumpStatus == "ON ") tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
   else tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
-  tft.print(pumpStatus);
+  tft.print(waterPumpStatus);
+
+  // Air Pump (Always ON status since it's hardwired)
+  tft.setCursor(10, 205);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
+  tft.print("A-Pump: ");
+  tft.setTextColor(ILI9341_ORANGE, ILI9341_BLACK);
+  tft.print(airPumpStatus);
 }
 
 void setup() {
   Serial.begin(115200); 
 
-  // Initialize TFT screen
   tft.begin();
   tft.setRotation(1); 
   tft.fillScreen(ILI9341_BLACK); 
-  tft.setTextSize(2);
-  tft.setTextColor(ILI9341_WHITE);
   
-  // Initialize Climate Sensor (BME280)
-  // Try 0x77 if 0x76 address fails
   bme.begin(0x76);
-
-  // Initialize Water Sensor (DS18B20)
   waterSensor.begin();
 
-  // Configure Water Level Sensor (HC-SR04)
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
 
+  tft.setTextSize(2);
+  tft.setTextColor(ILI9341_WHITE);
   tft.setCursor(10, 30);
-  tft.print("Connecting to Wi-Fi...");
+  tft.print("Connecting Wi-Fi...");
   
-  // Connect to Wi-Fi
   WiFi.begin(ssid, password);
   int connectionTimeout = 0;
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    tft.print(".");
     connectionTimeout++;
-    if(connectionTimeout > 20) { tft.setCursor(10, 60); connectionTimeout = 0; }
+    if(connectionTimeout > 20) break; // Don't get stuck forever
   }
-  
   tft.fillScreen(ILI9341_BLACK);
-  tft.setCursor(10, 30);
-  tft.setTextColor(ILI9341_GREEN);
-  tft.print("Wi-Fi Connected!");
-  delay(1000);
-
-  // Start NTP time client
+  
   timeClient.begin();
   
-  // Configure relays and button
+  // Initialize Relays (ACTIVE LOW LOGIC)
   pinMode(relay1Pin, OUTPUT);
-  digitalWrite(relay1Pin, HIGH); // Default OFF
-  pinMode(buttonPin, INPUT_PULLUP); 
+  digitalWrite(relay1Pin, HIGH); // Grow Light OFF
+  
   pinMode(relay2Pin, OUTPUT);
-  digitalWrite(relay2Pin, LOW);  // Default OFF   
+  digitalWrite(relay2Pin, HIGH); // Water Pump OFF (Changed from LOW to HIGH!)
 
-  // Configure FastLED
+  pinMode(buttonPin, INPUT_PULLUP); 
+
   FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(150); 
 
-  tft.fillScreen(ILI9341_BLACK); 
   updateDisplay(); 
 }
 
 void loop() {
-  // Update time from internet
   timeClient.update();
   unsigned long currentMillis = millis();
 
@@ -206,72 +189,60 @@ void loop() {
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis; 
     
-    // Read BME280 (Air)
     airTemp = bme.readTemperature();
     airHum = bme.readHumidity();
 
-    // Read DS18B20 (Water Temp)
     waterSensor.requestTemperatures(); 
     waterTemp = waterSensor.getTempCByIndex(0);
 
-    // Read HC-SR04 (Water Level)
     digitalWrite(trigPin, LOW);
     delayMicroseconds(2);
-    digitalWrite(trigPin, HIGH);   // Send ping
+    digitalWrite(trigPin, HIGH);
     delayMicroseconds(10);
     digitalWrite(trigPin, LOW);
     
-    // Read response pulse
     long duration = pulseIn(echoPin, HIGH);
-    // Calculate distance based on speed of sound (343 m/s) and divide by 2
     waterDistance = duration * 0.034 / 2; 
     
-    updateDisplay(); // Update screen every 2 seconds
+    updateDisplay(); 
   }
 
   // ==========================================
   // PART 2: SYSTEM LOGIC
   // ==========================================
-  // Grow Light Logic
+  
+  // 1. Grow Light Logic
   int lightValue = analogRead(lightSensorPin);
   String oldLightStatus = lightStatus;
 
   if (lightValue > threshold) {
     if (lightStatus != "ON ") { 
-      digitalWrite(relay1Pin, LOW); // Turn on grow light
-      delay(300);                   // Small delay for LED startup
-      fill_solid(leds, NUM_LEDS, CRGB::White); 
-      FastLED.show();
+      digitalWrite(relay1Pin, LOW); // Turn ON (Active LOW)
+      fill_solid(leds, NUM_LEDS, CRGB::White); FastLED.show();
       lightStatus = "ON "; 
     }
   } else {
     if (lightStatus != "OFF") {
-      fill_solid(leds, NUM_LEDS, CRGB::Black); 
-      FastLED.show();
-      delay(50); 
-      digitalWrite(relay1Pin, HIGH); // Turn off grow light
+      fill_solid(leds, NUM_LEDS, CRGB::Black); FastLED.show();
+      digitalWrite(relay1Pin, HIGH); // Turn OFF
       lightStatus = "OFF";
     }
   }
+  if (oldLightStatus != lightStatus) updateDisplay();
 
-  // Instant display update for light feedback
-  if (oldLightStatus != lightStatus) {
-    updateDisplay();
-  }
-
-  // Manual Water Pump Logic (Button)
+  // 2. Manual Water Pump Logic (Button)
   int buttonState = digitalRead(buttonPin); 
   if (buttonState == LOW) {
-    pumpStatus = "ON ";
-    updateDisplay(); // Show status change instantly
+    waterPumpStatus = "ON ";
+    updateDisplay(); 
     
-    digitalWrite(relay2Pin, HIGH);  // Turn pump ON
-    delay(10000);                   // Wait 10 seconds
-    digitalWrite(relay2Pin, LOW);   // Turn pump OFF
+    digitalWrite(relay2Pin, LOW);   // Turn ON pump (Active LOW logic fixed)
+    delay(10000);                   
+    digitalWrite(relay2Pin, HIGH);  // Turn OFF pump
     
-    pumpStatus = "OFF";
+    waterPumpStatus = "OFF";
     updateDisplay(); 
   }
 
-  delay(50); // Small stability delay
+  delay(50); 
 }
