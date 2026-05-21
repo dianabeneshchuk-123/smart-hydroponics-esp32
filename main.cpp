@@ -170,7 +170,7 @@ void setup() {
   timeClient.begin();
   
   // Initialize Relays (ACTIVE LOW LOGIC)
-  // CRITICAL FIX: Set HIGH state BEFORE declaring pinMode to prevent startup glitch
+  // Set HIGH state BEFORE declaring pinMode to prevent startup glitch
   digitalWrite(relay1Pin, HIGH); // Grow Light OFF
   pinMode(relay1Pin, OUTPUT);
   
@@ -233,20 +233,24 @@ void loop() {
   // PART 2: SYSTEM LOGIC
   // ==========================================
   
-  // 1. Grow Light Logic
+  // 1. Grow Light Logic (FIXED: Added delays for Relay switching)
   int lightValue = analogRead(lightSensorPin);
   String oldLightStatus = lightStatus;
 
   if (lightValue > threshold) {
     if (lightStatus != "ON ") { 
-      digitalWrite(relay1Pin, LOW); // Turn ON (Active LOW)
-      fill_solid(leds, NUM_LEDS, CRGB::White); FastLED.show();
+      digitalWrite(relay1Pin, LOW);            // 1. Turn ON Relay 1 (provide 12V to Strip)
+      delay(150);                              // 2. WAIT for strip to power up
+      fill_solid(leds, NUM_LEDS, CRGB::White); // 3. Send color data
+      FastLED.show();
       lightStatus = "ON "; 
     }
   } else {
     if (lightStatus != "OFF") {
-      fill_solid(leds, NUM_LEDS, CRGB::Black); FastLED.show();
-      digitalWrite(relay1Pin, HIGH); // Turn OFF
+      fill_solid(leds, NUM_LEDS, CRGB::Black); // 1. Turn off LEDs gracefully
+      FastLED.show();
+      delay(50);                               // 2. Wait a moment for data to process
+      digitalWrite(relay1Pin, HIGH);           // 3. Cut 12V power from relay
       lightStatus = "OFF";
     }
   }
