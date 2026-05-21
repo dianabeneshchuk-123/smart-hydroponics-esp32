@@ -16,14 +16,15 @@
 // ==========================================
 // WI-FI & THINGSBOARD KONFIGURATION
 // ==========================================
-const char* ssid     = "RASPBERRYNET";     // <--- ВПИШІТЬ ВАШ WI-FI
-const char* password = "VerySecret"; // <--- ВПИШІТЬ ПАРОЛЬ
+const char* ssid     = "YOUR_WIFI_NAME";     // <--- ВПИШІТЬ ВАШ WI-FI
+const char* password = "YOUR_WIFI_PASSWORD"; // <--- ВПИШІТЬ ПАРОЛЬ
 
 #define TOKEN "XZE8jljP8NUnN5TQFIRZ"         // Dit ThingsBoard Access Token
 const char* mqtt_server = "thingsboard.cloud";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
+unsigned long lastMqttReconnectAttempt = 0;  // NON-BLOCKING TIMER
 
 // NTP Tidsindstilling specifikt for Danmark
 WiFiUDP ntpUDP;
@@ -42,18 +43,17 @@ CRGB leds[NUM_LEDS];
 // ==========================================
 // KONFIGURATION AF SENSORER
 // ==========================================
-Adafruit_BME280 bme; // BME280 (Luftklima)
+Adafruit_BME280 bme; 
 
 #define ONE_WIRE_BUS 5 
 OneWire oneWire(ONE_WIRE_BUS);
-DallasTemperature waterSensor(&oneWire); // DS18B20 (Vandtemperatur)
+DallasTemperature waterSensor(&oneWire); 
 
-// HC-SR04 (Vandstand)
 const int trigPin = 27; 
 const int echoPin = 14; 
 
 unsigned long previousMillis = 0;
-const long interval = 2000; // Opdater sensorer hvert 2. sekund
+const long interval = 2000; 
 int lastSecond = -1;        
 
 // ==========================================
@@ -67,10 +67,10 @@ Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 // ==========================================
 // SYSTEMPINS (RELÆER OG KNAP)
 // ==========================================
-const int lightSensorPin = 34; // Lyssensor
-const int relay1Pin = 25;      // Relæ 1: Vækstlys
-const int relay2Pin = 26;      // Relæ 2: Vandpumpe
-const int buttonPin = 33;      // Knap til manuel opfyldning
+const int lightSensorPin = 34; 
+const int relay1Pin = 25;      
+const int relay2Pin = 26;      
+const int buttonPin = 33;      
 
 int threshold = 2000; 
 float airTemp = 0.0, airHum = 0.0, waterTemp = 0.0;
@@ -79,19 +79,18 @@ int waterPercent = 0;
 
 String lightStatus = "OFF";
 String waterPumpStatus = "OFF";
-String airPumpStatus = "ON ";  // Manuel 230V pumpe i 11L tank
+String airPumpStatus = "ON ";  
 
 // ==========================================
-// FUNKTIONER TIL THINGSBOARD FORBINDELSE
+// NON-BLOCKING MQTT RECONNECT FUNKTION
 // ==========================================
-void reconnectMQTT() {
-  while (!client.connected()) {
-    if (client.connect("ESP32_Hydroponics", TOKEN, NULL)) {
-      // Forbundet til ThingsBoard
-    } else {
-      delay(5000); // Vent 5 sekunder før næste forsøg
-    }
+boolean reconnectMQTT() {
+  if (client.connect("ESP32_Hydroponics", TOKEN, NULL)) {
+    Serial.println("ThingsBoard Connected!");
+    return client.connected();
   }
+  Serial.println("ThingsBoard Connect Failed...");
+  return false;
 }
 
 // ==========================================
@@ -188,9 +187,14 @@ void setup() {
   tft.print("Connecting Wi-Fi...");
   
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) { delay(500); }
+  int connectionTimeout = 0;
+  // Vent max 10 sekunder på Wi-Fi, derefter fortsæt alligevel
+  while (WiFi.status() != WL_CONNECTED) { 
+    delay(500); 
+    connectionTimeout++;
+    if(connectionTimeout > 20) break; 
+  }
   
-  // Initialisering af ThingsBoard
   client.setServer(mqtt_server, 1883);
 
   tft.fillScreen(ILI9341_BLACK);
@@ -212,17 +216,25 @@ void setup() {
   FastLED.setBrightness(150); 
 
   updateDisplay(); 
+  lastMqttReconnectAttempt = 0;
 }
 
 void loop() {
-  // Oprethold forbindelse til ThingsBoard
+  unsigned long currentMillis = millis();
+
+  // --- NON-BLOCKING THINGSBOARD CONNECTION ---
   if (!client.connected()) {
-    reconnectMQTT();
+    if (currentMillis - lastMqttReconnectAttempt > 5000) {
+      lastMqttReconnectAttempt = currentMillis;
+      if (reconnectMQTT()) {
+        lastMqttReconnectAttempt = 0;
+      }
+    }
+  } else {
+    client.loop(); // Lytter til indgående MQTT beskeder
   }
-  client.loop();
 
   timeClient.update();
-  unsigned long currentMillis = millis();
   bool displayNeedsUpdate = false; 
 
   if (timeClient.getSeconds() != lastSecond) {
@@ -230,7 +242,7 @@ void loop() {
     displayNeedsUpdate = true; 
   }
 
-  // Læsning af sensorer HVERT 2. SEKUND OG SEND TIL THINGSBOARD
+  // Læsning af sensorer HVERT 2. SEKUND
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis; 
     
@@ -255,19 +267,19 @@ void loop() {
     
     displayNeedsUpdate = true; 
 
-    // --- SEND DATA (TELEMETRI) TIL THINGSBOARD ---
-    String payload = "{";
-    payload += "\"temperature\":" + String(airTemp) + ",";
-    payload += "\"humidity\":" + String(airHum) + ",";
-    payload += "\"water_temp\":" + String(waterTemp) + ",";
-    payload += "\"water_level\":" + String(waterPercent);
-    payload += "}";
-
-    // Udgiv data til ThingsBoards standard-emne
-    client.publish("v1/devices/me/telemetry", payload.c_str());
+    // SEND DATA KUN HVIS FORBUNDET TIL THINGSBOARD
+    if (client.connected()) {
+      String payload = "{";
+      payload += "\"temperature\":" + String(airTemp) + ",";
+      payload += "\"humidity\":" + String(airHum) + ",";
+      payload += "\"water_temp\":" + String(waterTemp) + ",";
+      payload += "\"water_level\":" + String(waterPercent);
+      payload += "}";
+      client.publish("v1/devices/me/telemetry", payload.c_str());
+    }
   }
 
-  // --- SYSTEMLOGIK (Lys og pumpe) ---
+  // --- SYSTEMLOGIK (Lys og pumpe virker altid, uanset internet!) ---
   int lightValue = analogRead(lightSensorPin);
   String oldLightStatus = lightStatus;
 
