@@ -11,12 +11,19 @@
 #include <OneWire.h>              // Kræves til DS18B20
 #include <DallasTemperature.h>    // Kræves til DS18B20
 #include <time.h>                 // Tilføjet til håndtering af dato
+#include <PubSubClient.h>         // Bibliotek til ThingsBoard (MQTT)
 
 // ==========================================
-// WI-FI KONFIGURATION
+// WI-FI & THINGSBOARD KONFIGURATION
 // ==========================================
-const char* ssid     = "RASPBERRYNET";     
-const char* password = "VerySecret"; 
+const char* ssid     = "RASPBERRYNET";     // <--- ВПИШІТЬ ВАШ WI-FI
+const char* password = "VerySecret"; // <--- ВПИШІТЬ ПАРОЛЬ
+
+#define TOKEN "XZE8jljP8NUnN5TQFIRZ"         // Dit ThingsBoard Access Token
+const char* mqtt_server = "thingsboard.cloud";
+
+WiFiClient espClient;
+PubSubClient client(espClient);
 
 // NTP Tidsindstilling specifikt for Danmark
 WiFiUDP ntpUDP;
@@ -47,7 +54,7 @@ const int echoPin = 14;
 
 unsigned long previousMillis = 0;
 const long interval = 2000; // Opdater sensorer hvert 2. sekund
-int lastSecond = -1;        // Til sporing af sekundændringer
+int lastSecond = -1;        
 
 // ==========================================
 // KONFIGURATION AF TFT-SKÆRM (SPI)
@@ -67,7 +74,6 @@ const int buttonPin = 33;      // Knap til manuel opfyldning
 
 int threshold = 2000; 
 float airTemp = 0.0, airHum = 0.0, waterTemp = 0.0;
-
 int waterDistance = 0; 
 int waterPercent = 0; 
 
@@ -76,15 +82,26 @@ String waterPumpStatus = "OFF";
 String airPumpStatus = "ON ";  // Manuel 230V pumpe i 11L tank
 
 // ==========================================
-// FUNKTION TIL AT TEGNE DASHBOARDET
+// FUNKTIONER TIL THINGSBOARD FORBINDELSE
+// ==========================================
+void reconnectMQTT() {
+  while (!client.connected()) {
+    if (client.connect("ESP32_Hydroponics", TOKEN, NULL)) {
+      // Forbundet til ThingsBoard
+    } else {
+      delay(5000); // Vent 5 sekunder før næste forsøg
+    }
+  }
+}
+
+// ==========================================
+// FUNKTION TIL AT TEGNE DASHBOARDET PÅ SKÆRMEN
 // ==========================================
 void updateDisplay() {
   tft.setTextSize(2);
   
-  // --- 1. HEADER: DATO OG TID ---
   time_t rawtime = timeClient.getEpochTime();
   struct tm * ti = localtime(&rawtime);
-  
   char dateBuffer[15];
   sprintf(dateBuffer, "%02d/%02d/%04d", ti->tm_mday, ti->tm_mon + 1, ti->tm_year + 1900);
   
@@ -93,48 +110,40 @@ void updateDisplay() {
   tft.print(dateBuffer);
   tft.print("  ");
   tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
-  tft.print(timeClient.getFormattedTime()); // Giver automatisk TT:MM:SS
+  tft.print(timeClient.getFormattedTime()); 
   
-  // --- 2. BLOK: KLIMA (Venstre kolonne) ---
   tft.setCursor(10, 50); 
   tft.setTextColor(ILI9341_LIGHTGREY, ILI9341_BLACK); 
   tft.print("AIR:");
-  
   tft.setCursor(10, 75); 
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
   tft.print("T: "); tft.print(airTemp, 1); tft.print("C  ");
-  
   tft.setCursor(10, 100); 
   tft.print("H: "); tft.print(airHum, 1); tft.print("%  ");
 
-  // --- 3. BLOK: VAND (Højre kolonne) ---
   tft.setCursor(160, 50); 
   tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK); 
   tft.print("WATER:");
-  
   tft.setCursor(160, 75); 
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
   tft.print("T: "); 
   if (waterTemp == -127.00) tft.print("ERR "); 
   else { tft.print(waterTemp, 1); tft.print("C  "); }
-
   tft.setCursor(160, 100); 
   tft.print("L: "); 
   if (waterPercent <= 10) tft.setTextColor(ILI9341_RED, ILI9341_BLACK); 
   else tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
   tft.print(waterPercent); tft.print("%   ");
 
-  // Tankens status (med farvet baggrund til alarm)
   tft.setCursor(160, 125);
   if (waterPercent <= 10) {
-    tft.setTextColor(ILI9341_WHITE, ILI9341_RED); // Hvid tekst på rød baggrund
+    tft.setTextColor(ILI9341_WHITE, ILI9341_RED); 
     tft.print(" LOW WATER ");
   } else {
-    tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK); // Grøn tekst på sort baggrund
+    tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK); 
     tft.print("[LEVEL OK]");
   }
 
-  // --- 4. BLOK: SYSTEMSTATUS ---
   tft.setCursor(10, 160); 
   tft.setTextColor(ILI9341_ORANGE, ILI9341_BLACK); 
   tft.print("SYSTEM STATUS:");
@@ -179,18 +188,15 @@ void setup() {
   tft.print("Connecting Wi-Fi...");
   
   WiFi.begin(ssid, password);
-  int connectionTimeout = 0;
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    connectionTimeout++;
-    if(connectionTimeout > 20) break; 
-  }
+  while (WiFi.status() != WL_CONNECTED) { delay(500); }
   
-  // Tegner statisk dashboard-grafik KUN ÉN GANG for at forhindre flimren
+  // Initialisering af ThingsBoard
+  client.setServer(mqtt_server, 1883);
+
   tft.fillScreen(ILI9341_BLACK);
-  tft.drawFastHLine(0, 35, 320, ILI9341_DARKGREY);   // Linje under uret
-  tft.drawFastHLine(0, 150, 320, ILI9341_DARKGREY);  // Linje over status
-  tft.drawFastVLine(150, 35, 115, ILI9341_DARKGREY); // Lodret linje mellem luft og vand
+  tft.drawFastHLine(0, 35, 320, ILI9341_DARKGREY);   
+  tft.drawFastHLine(0, 150, 320, ILI9341_DARKGREY);  
+  tft.drawFastVLine(150, 35, 115, ILI9341_DARKGREY); 
   
   timeClient.begin();
   
@@ -209,17 +215,22 @@ void setup() {
 }
 
 void loop() {
+  // Oprethold forbindelse til ThingsBoard
+  if (!client.connected()) {
+    reconnectMQTT();
+  }
+  client.loop();
+
   timeClient.update();
   unsigned long currentMillis = millis();
-  bool displayNeedsUpdate = false; // Flag til smart opdatering af skærmen
+  bool displayNeedsUpdate = false; 
 
-  // 1. KONTROL AF UR (Hvert sekund)
   if (timeClient.getSeconds() != lastSecond) {
     lastSecond = timeClient.getSeconds();
-    displayNeedsUpdate = true; // Sekundet er skiftet - skærmen skal opdateres
+    displayNeedsUpdate = true; 
   }
 
-  // 2. KONTROL AF SENSORER (Hvert 2. sekund)
+  // Læsning af sensorer HVERT 2. SEKUND OG SEND TIL THINGSBOARD
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis; 
     
@@ -242,10 +253,21 @@ void loop() {
     if (waterPercent > 100) waterPercent = 100;
     if (waterPercent < 0) waterPercent = 0;
     
-    displayNeedsUpdate = true; // Nye data er læst - skærmen skal opdateres
+    displayNeedsUpdate = true; 
+
+    // --- SEND DATA (TELEMETRI) TIL THINGSBOARD ---
+    String payload = "{";
+    payload += "\"temperature\":" + String(airTemp) + ",";
+    payload += "\"humidity\":" + String(airHum) + ",";
+    payload += "\"water_temp\":" + String(waterTemp) + ",";
+    payload += "\"water_level\":" + String(waterPercent);
+    payload += "}";
+
+    // Udgiv data til ThingsBoards standard-emne
+    client.publish("v1/devices/me/telemetry", payload.c_str());
   }
 
-  // 3. SYSTEMLOGIK
+  // --- SYSTEMLOGIK (Lys og pumpe) ---
   int lightValue = analogRead(lightSensorPin);
   String oldLightStatus = lightStatus;
 
@@ -286,7 +308,6 @@ void loop() {
   }
   if (oldPumpStatus != waterPumpStatus) displayNeedsUpdate = true;
 
-  // 4. OPDATERING AF SKÆRM (Kun hvis noget er ændret)
   if (displayNeedsUpdate) {
     updateDisplay();
   }
