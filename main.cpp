@@ -14,8 +14,8 @@
 // ==========================================
 // WI-FI CONFIGURATION
 // ==========================================
-const char* ssid     = "RASPBERRYNET";     
-const char* password = "VerySecret"; 
+const char* ssid     = "YOUR_WIFI_NAME";     
+const char* password = "YOUR_WIFI_PASSWORD"; 
 
 // NTP Time setup specifically for Denmark
 WiFiUDP ntpUDP;
@@ -73,6 +73,11 @@ String lightStatus = "OFF";
 String waterPumpStatus = "OFF";
 String airPumpStatus = "ON ";  // Assuming Air Pump is plugged straight into 230V
 
+// Water Pump Timers
+unsigned long previousPumpMillis = 0;
+const unsigned long SIX_HOURS_MS = 21600000UL; // 6 hours in milliseconds
+const unsigned long PUMP_RUN_TIME = 10000UL;   // 10 seconds
+
 // Function to refresh the information on the TFT screen
 void updateDisplay() {
   tft.setTextSize(2);
@@ -127,7 +132,7 @@ void updateDisplay() {
   else tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
   tft.print(waterPumpStatus);
 
-  // Air Pump (Always ON status since it's hardwired)
+  // Air Pump (Always ON status)
   tft.setCursor(10, 205);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
   tft.print("A-Pump: ");
@@ -169,7 +174,7 @@ void setup() {
   digitalWrite(relay1Pin, HIGH); // Grow Light OFF
   
   pinMode(relay2Pin, OUTPUT);
-  digitalWrite(relay2Pin, HIGH); // Water Pump OFF (Changed from LOW to HIGH!)
+  digitalWrite(relay2Pin, HIGH); // Water Pump OFF 
 
   pinMode(buttonPin, INPUT_PULLUP); 
 
@@ -177,6 +182,22 @@ void setup() {
   FastLED.setBrightness(150); 
 
   updateDisplay(); 
+}
+
+// Helper function to run the water pump for 10 seconds
+void runWaterPump() {
+  waterPumpStatus = "ON ";
+  updateDisplay(); 
+  
+  digitalWrite(relay2Pin, LOW);   // Turn ON pump (Active LOW)
+  delay(PUMP_RUN_TIME);           // Wait 10 seconds      
+  digitalWrite(relay2Pin, HIGH);  // Turn OFF pump
+  
+  waterPumpStatus = "OFF";
+  updateDisplay(); 
+  
+  // Reset the timer so it doesn't trigger immediately after a manual press
+  previousPumpMillis = millis(); 
 }
 
 void loop() {
@@ -230,18 +251,15 @@ void loop() {
   }
   if (oldLightStatus != lightStatus) updateDisplay();
 
-  // 2. Manual Water Pump Logic (Button)
+  // 2. Water Pump Auto-Circulation (Every 6 Hours)
+  if (currentMillis - previousPumpMillis >= SIX_HOURS_MS) {
+    runWaterPump();
+  }
+
+  // 3. Manual Water Pump Logic (Button)
   int buttonState = digitalRead(buttonPin); 
   if (buttonState == LOW) {
-    waterPumpStatus = "ON ";
-    updateDisplay(); 
-    
-    digitalWrite(relay2Pin, LOW);   // Turn ON pump (Active LOW logic fixed)
-    delay(10000);                   
-    digitalWrite(relay2Pin, HIGH);  // Turn OFF pump
-    
-    waterPumpStatus = "OFF";
-    updateDisplay(); 
+    runWaterPump();
   }
 
   delay(50); 
