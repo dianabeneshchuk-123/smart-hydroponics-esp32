@@ -163,18 +163,19 @@ void setup() {
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     connectionTimeout++;
-    if(connectionTimeout > 20) break; // Don't get stuck forever
+    if(connectionTimeout > 20) break; 
   }
   tft.fillScreen(ILI9341_BLACK);
   
   timeClient.begin();
   
   // Initialize Relays (ACTIVE LOW LOGIC)
-  pinMode(relay1Pin, OUTPUT);
+  // CRITICAL FIX: Set HIGH state BEFORE declaring pinMode to prevent startup glitch
   digitalWrite(relay1Pin, HIGH); // Grow Light OFF
+  pinMode(relay1Pin, OUTPUT);
   
-  pinMode(relay2Pin, OUTPUT);
   digitalWrite(relay2Pin, HIGH); // Water Pump OFF 
+  pinMode(relay2Pin, OUTPUT);
 
   pinMode(buttonPin, INPUT_PULLUP); 
 
