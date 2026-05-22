@@ -16,8 +16,8 @@
 // ==========================================
 // WI-FI & THINGSBOARD KONFIGURATION
 // ==========================================
-const char* ssid     = "RASPBERRYNET";     // <--- ВПИШІТЬ ВАШ WI-FI
-const char* password = "VerySecret"; // <--- ВПИШІТЬ ПАРОЛЬ
+const char* ssid     = "RASPBERRYNET";     // 
+const char* password = "VerySecret"; // 
 
 #define TOKEN "XZE8jljP8NUnN5TOFlRZ"         // Dit ThingsBoard Access Token
 const char* mqtt_server = "thingsboard.cloud";
@@ -273,7 +273,8 @@ void loop() {
       payload += "\"temperature\":" + String(airTemp) + ",";
       payload += "\"humidity\":" + String(airHum) + ",";
       payload += "\"water_temp\":" + String(waterTemp) + ",";
-      payload += "\"water_level\":" + String(waterPercent);
+      payload += "\"water_level\":" + String(waterPercent) + ","; // Додали кому в кінці цього рядка
+      payload += "\"waterPumpStatus\":\"" + waterPumpStatus + "\""; // <-- ДОДАЛИ СТАТУС ПОМПИ!
       payload += "}";
       client.publish("v1/devices/me/telemetry", payload.c_str());
     }
