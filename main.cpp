@@ -16,28 +16,27 @@
 // ==========================================
 // WI-FI & THINGSBOARD KONFIGURATION
 // ==========================================
-const char* ssid     = "RASPBERRYNET";     // 
-const char* password = "VerySecret"; // 
+const char* ssid     = "RASPBERRYNET";     
+const char* password = "VerySecret"; 
 
-#define TOKEN "XZE8jljP8NUnN5TOFlRZ"         // Dit ThingsBoard Access Token
+#define TOKEN "XZE8jljP8NUnN5TOFlRZ"         
 const char* mqtt_server = "thingsboard.cloud";
 
 WiFiClient espClient;
 PubSubClient client(espClient);
-unsigned long lastMqttReconnectAttempt = 0;  // NON-BLOCKING TIMER
+unsigned long lastMqttReconnectAttempt = 0;  
 
-// NTP Tidsindstilling specifikt for Danmark
 WiFiUDP ntpUDP;
-time_t timeOffset = 7200; // UTC+2 (Dansk sommertid)
+time_t timeOffset = 7200; 
 NTPClient timeClient(ntpUDP, "pool.ntp.org", timeOffset); 
 
 // ==========================================
 // KONFIGURATION AF LED-BÅND
 // ==========================================
-#define LED_PIN     32
+#define LED_PIN      32
 #define NUM_LEDS     60
-#define LED_TYPE    WS2813
-#define COLOR_ORDER GRB
+#define LED_TYPE     WS2813
+#define COLOR_ORDER  GRB
 CRGB leds[NUM_LEDS];
 
 // ==========================================
@@ -81,20 +80,52 @@ String lightStatus = "OFF";
 String waterPumpStatus = "OFF";
 String airPumpStatus = "ON ";  
 
+bool rpcPumpON = false; 
+unsigned long rpcPumpTimer = 0; // Таймер для 5 секунд
+
+// ==========================================
+// FUNKTION TIL AT MODTAGE RPC-KOMMANDOER
+// ==========================================
+void callback(char* topic, byte* payload, unsigned int length) {
+  String message = "";
+  for (int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+
+  if (String(topic).indexOf("v1/devices/me/rpc/request/") != -1) {
+    String requestId = String(topic).substring(String(topic).lastIndexOf("/") + 1);
+
+    if (message.indexOf("\"method\":\"setValue\"") != -1) {
+      if (message.indexOf("\"params\":true") != -1) {
+        rpcPumpON = true; 
+        rpcPumpTimer = millis(); // Запускаємо відлік 5 секунд!
+      } else if (message.indexOf("\"params\":false") != -1) {
+        rpcPumpON = false; 
+      }
+      String replyTopic = "v1/devices/me/rpc/response/" + requestId;
+      client.publish(replyTopic.c_str(), "{}"); 
+    }
+    else if (message.indexOf("\"method\":\"getValue\"") != -1) {
+      String replyTopic = "v1/devices/me/rpc/response/" + requestId;
+      String replyPayload = (waterPumpStatus == "ON ") ? "true" : "false";
+      client.publish(replyTopic.c_str(), replyPayload.c_str());
+    }
+  }
+}
+
 // ==========================================
 // NON-BLOCKING MQTT RECONNECT FUNKTION
 // ==========================================
 boolean reconnectMQTT() {
   if (client.connect("ESP32_Hydroponics", TOKEN, NULL)) {
-    Serial.println("ThingsBoard Connected!");
+    client.subscribe("v1/devices/me/rpc/request/+"); 
     return client.connected();
   }
-  Serial.println("ThingsBoard Connect Failed...");
   return false;
 }
 
 // ==========================================
-// FUNKTION TIL AT TEGNE DASHBOARDET PÅ SKÆRMEN
+// FUNKTION TIL AT TEGNE DASHBOARDET
 // ==========================================
 void updateDisplay() {
   tft.setTextSize(2);
@@ -188,7 +219,6 @@ void setup() {
   
   WiFi.begin(ssid, password);
   int connectionTimeout = 0;
-  // Vent max 10 sekunder på Wi-Fi, derefter fortsæt alligevel
   while (WiFi.status() != WL_CONNECTED) { 
     delay(500); 
     connectionTimeout++;
@@ -196,6 +226,7 @@ void setup() {
   }
   
   client.setServer(mqtt_server, 1883);
+  client.setCallback(callback); 
 
   tft.fillScreen(ILI9341_BLACK);
   tft.drawFastHLine(0, 35, 320, ILI9341_DARKGREY);   
@@ -222,7 +253,6 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
 
-  // --- NON-BLOCKING THINGSBOARD CONNECTION ---
   if (!client.connected()) {
     if (currentMillis - lastMqttReconnectAttempt > 5000) {
       lastMqttReconnectAttempt = currentMillis;
@@ -231,7 +261,12 @@ void loop() {
       }
     }
   } else {
-    client.loop(); // Lytter til indgående MQTT beskeder
+    client.loop(); 
+  }
+
+  // --- 5-СЕКУНДНИЙ ТАЙМЕР ДЛЯ КНОПКИ З ІНТЕРНЕТУ ---
+  if (rpcPumpON && (currentMillis - rpcPumpTimer >= 5000)) {
+    rpcPumpON = false; // Вимикаємо через 5 секунд
   }
 
   timeClient.update();
@@ -242,7 +277,6 @@ void loop() {
     displayNeedsUpdate = true; 
   }
 
-  // Læsning af sensorer HVERT 2. SEKUND
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis; 
     
@@ -267,20 +301,19 @@ void loop() {
     
     displayNeedsUpdate = true; 
 
-    // SEND DATA KUN HVIS FORBUNDET TIL THINGSBOARD
     if (client.connected()) {
       String payload = "{";
       payload += "\"temperature\":" + String(airTemp) + ",";
       payload += "\"humidity\":" + String(airHum) + ",";
       payload += "\"water_temp\":" + String(waterTemp) + ",";
-      payload += "\"water_level\":" + String(waterPercent) + ","; // Додали кому в кінці цього рядка
-      payload += "\"waterPumpStatus\":\"" + waterPumpStatus + "\""; // <-- ДОДАЛИ СТАТУС ПОМПИ!
-      payload += "}";
+      payload += "\"water_level\":" + String(waterPercent) + ","; 
+      payload += "\"waterPumpStatus\":\"" + waterPumpStatus + "\","; 
+      payload += "\"lightStatus\":\"" + lightStatus + "\"";          
+      payload += "}";                                                
       client.publish("v1/devices/me/telemetry", payload.c_str());
     }
   }
 
-  // --- SYSTEMLOGIK (Lys og pumpe virker altid, uanset internet!) ---
   int lightValue = analogRead(lightSensorPin);
   String oldLightStatus = lightStatus;
 
@@ -303,13 +336,32 @@ void loop() {
   }
   if (oldLightStatus != lightStatus) displayNeedsUpdate = true;
 
+  // ==========================================
+  // ФІНАЛЬНА ІЄРАРХІЯ ЛОГІКИ ПОМПИ (ІЗ ЗАПОБІЖНИКОМ ДЛЯ ІСПИТУ)
+  // ==========================================
   int buttonState = digitalRead(buttonPin); 
   String oldPumpStatus = waterPumpStatus;
 
   if (buttonState == LOW) {
+    // 1 ПРІОРИТЕТ: Фізична кнопка на столі (працює завжди, поки натиснута)
     digitalWrite(relay2Pin, LOW);   
     waterPumpStatus = "ON ";
-  } else {
+  } 
+  else if (rpcPumpON) {
+    // 2 ПРІОРИТЕТ: Кнопка з ThingsBoard (працює 5 секунд)
+    digitalWrite(relay2Pin, LOW); 
+    waterPumpStatus = "ON ";
+    
+    // ЗАПОБІЖНИК: якщо під час цих 5 секунд вода дійде до краю бака (<= 5 см),
+    // система миттєво обірве таймер і вимкне помпу!
+    if (waterDistance <= 5) {
+      digitalWrite(relay2Pin, HIGH); 
+      waterPumpStatus = "OFF";
+      rpcPumpON = false; // Скидаємо віртуальну кнопку
+    }
+  } 
+  else {
+    // 3 ПРІОРИТЕТ: Фонова автоматика
     if (waterDistance >= 10) {      
       digitalWrite(relay2Pin, LOW); 
       waterPumpStatus = "ON ";
@@ -319,6 +371,7 @@ void loop() {
       waterPumpStatus = "OFF";
     }
   }
+  
   if (oldPumpStatus != waterPumpStatus) displayNeedsUpdate = true;
 
   if (displayNeedsUpdate) {
