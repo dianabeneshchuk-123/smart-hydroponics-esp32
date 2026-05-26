@@ -84,7 +84,7 @@ bool rpcPumpON = false;
 unsigned long rpcPumpTimer = 0; // Таймер для 5 секунд
 
 // ==========================================
-// ОНОВЛЕНА ФУНКЦІЯ ДЛЯ ПРИЙОМУ RPC-КОМАНД (ThingsBoard 4.x)
+// ОНОВЛЕНА ФУНКЦІЯ ДЛЯ ПРИЙОМУ RPC-КОМАНД (Універсальна)
 // ==========================================
 void callback(char* topic, byte* payload, unsigned int length) {
   String message = "";
@@ -92,7 +92,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     message += (char)payload[i];
   }
 
-  // Виводимо отримане повідомлення в Serial Monitor для діагностики завад та JSON
+  // Вивід у Serial Monitor (PlatformIO Термінал) для повної діагностики JSON
   Serial.print("Received RPC: ");
   Serial.println(message);
 
@@ -100,21 +100,24 @@ void callback(char* topic, byte* payload, unsigned int length) {
     String requestId = String(topic).substring(String(topic).lastIndexOf("/") + 1);
     String replyTopic = "v1/devices/me/rpc/response/" + requestId;
 
-    if (message.indexOf("\"method\":\"setValue\"") != -1) {
-      // Перевіряємо обидва варіанти написання true (старий формат і новий вкладений об'єкт)
+    // Перевіряємо Обидва методи: і старий setValue, і новий setState від кнопок
+    if (message.indexOf("\"method\":\"setValue\"") != -1 || message.indexOf("\"method\":\"setState\"") != -1) {
+      
+      // Ловимо true у будь-якому форматі JSON (прямому чи вкладеному {"value":true})
       if (message.indexOf("\"params\":true") != -1 || message.indexOf("\"value\":true") != -1) {
         rpcPumpON = true; 
-        rpcPumpTimer = millis(); // Запускаємо відлік 5 секунд!
+        rpcPumpTimer = millis(); // Запускаємо 5 секунд
         client.publish(replyTopic.c_str(), "{\"success\":true}");
-        Serial.println("-> Pump components triggered: ON (5 seconds)");
+        Serial.println("-> PUMP TRIGGERED: ON (5 SECONDS)");
       } 
       else if (message.indexOf("\"params\":false") != -1 || message.indexOf("\"value\":false") != -1) {
         rpcPumpON = false; 
         client.publish(replyTopic.c_str(), "{\"success\":false}");
-        Serial.println("-> Pump components triggered: OFF");
+        Serial.println("-> PUMP TRIGGERED: OFF");
       }
     }
-    else if (message.indexOf("\"method\":\"getValue\"") != -1) {
+    // Перевіряємо запит стану: getValue або getState
+    else if (message.indexOf("\"method\":\"getValue\"") != -1 || message.indexOf("\"method\":\"getState\"") != -1) {
       String replyPayload = (waterPumpStatus == "ON ") ? "true" : "false";
       client.publish(replyTopic.c_str(), replyPayload.c_str());
     }
@@ -345,30 +348,28 @@ void loop() {
   if (oldLightStatus != lightStatus) displayNeedsUpdate = true;
 
   // ==========================================
-  // ФІНАЛЬНА ІЄРАРХІЯ ЛОГІКИ ПОМПИ (З БЛОКУВАННЯМ РІВНЯ)
+  // ФІНАЛЬНА ІЄРАРХІЯ ЛОГІКИ ПОМПИ
   // ==========================================
   int buttonState = digitalRead(buttonPin); 
   String oldPumpStatus = waterPumpStatus;
 
-  // Блокування: якщо рівень води більше 60%, safetyAllowed стає false
-  bool safetyAllowed = (waterPercent <= 60);
+  // ТИМЧАСОВО: ставимо true для чистого тестування кнопки ThingsBoard!
+  bool safetyAllowed = true; 
 
-  // 1 ПРІОРИТЕТ: Фізична кнопка на столі (працює завжди, поки натиснута, ЯКЩО дозволяє рівень води)
+  // 1 ПРІОРИТЕТ: Фізична кнопка на столі
   if (buttonState == LOW && safetyAllowed) {
     digitalWrite(relay2Pin, LOW);   
     waterPumpStatus = "ON ";
   } 
-  // 2 ПРІОРИТЕТ: Кнопка з ThingsBoard (працює 5 секунд, ЯКЩО дозволяє рівень води)
+  // 2 ПРІОРИТЕТ: Кнопка з ThingsBoard (5 секунд)
   else if (rpcPumpON && safetyAllowed) {
     digitalWrite(relay2Pin, LOW); 
     waterPumpStatus = "ON ";
   } 
-  // 3 ПРІОРИТЕТ: Вимкнення
+  // 3 ПРІОРИТЕТ: Вимкнено
   else {
     digitalWrite(relay2Pin, HIGH); 
     waterPumpStatus = "OFF";
-    
-    // Якщо спрацював захист під час роботи 5-секундного таймера, скидаємо віртуальну кнопку
     if (!safetyAllowed && rpcPumpON) {
       rpcPumpON = false;
     }
