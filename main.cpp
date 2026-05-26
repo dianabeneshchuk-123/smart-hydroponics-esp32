@@ -344,7 +344,14 @@ void loop() {
 
   int buttonState = digitalRead(buttonPin); 
   String oldPumpStatus = waterPumpStatus;
+
+  // ==================================================
+  // АВТОМАТИЧНИЙ ЗАХИСТ ВІД ПЕРЕЛИВУ (60%)
+  // ==================================================
   bool safetyAllowed = true; 
+  if (waterPercent >= 60) {
+    safetyAllowed = false; // Якщо бак заповнено на 60%+, блокуємо помпу повністю!
+  }
 
   if (buttonState == LOW && safetyAllowed) {
     digitalWrite(relay2Pin, LOW);
@@ -368,7 +375,7 @@ void loop() {
   if (oldPumpStatus != waterPumpStatus) {
     displayNeedsUpdate = true;
     
-    delay(20); 
+    delay(30); // Оптимальний зменшений делей
     tft.begin();
     tft.setRotation(1);
     tft.fillScreen(ILI9341_BLACK);
