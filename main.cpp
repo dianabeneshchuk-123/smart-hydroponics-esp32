@@ -68,7 +68,7 @@ Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 // ==========================================
 const int lightSensorPin = 34; 
 const int relay1Pin = 25;      
-const int relay2Pin = 19;      
+const int relay2Pin = 26;      
 const int buttonPin = 33;      
 
 int threshold = 2000; 
@@ -128,10 +128,16 @@ void callback(char* topic, byte* payload, unsigned int length) {
 // NON-BLOCKING MQTT RECONNECT FUNKTION
 // ==========================================
 boolean reconnectMQTT() {
+  Serial.print("Connecting to ThingsBoard MQTT...");
   if (client.connect("ESP32_Hydroponics", TOKEN, NULL)) {
+    Serial.println(" [SUCCESS] Connected!");
     client.subscribe("v1/devices/me/rpc/request/+"); 
-    return client.connected();
+    // Додаємо підписку на новий формат RPC для ThingsBoard 4.x
+    client.subscribe("v1/devices/me/rpc/+"); 
+    return true;
   }
+  Serial.print(" [FAILED] Error state: ");
+  Serial.println(client.state());
   return false;
 }
 
@@ -238,6 +244,9 @@ void setup() {
   
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback); 
+  
+  // ЗБІЛЬШУЄМО БУФЕР ДЛЯ ВЕЛИКИХ RPC ПАКЕТІВ (ThingsBoard 4.x)
+  client.setBufferSize(512);
 
   tft.fillScreen(ILI9341_BLACK);
   tft.drawFastHLine(0, 35, 320, ILI9341_DARKGREY);   
@@ -303,7 +312,8 @@ void loop() {
     delayMicroseconds(10);
     digitalWrite(trigPin, LOW);
     
-    long duration = pulseIn(echoPin, HIGH);
+    // ДОДАНО ТАЙМАУТ 30 мс, ЩОБ ПЛАТА НЕ ЗАВИСАЛА І НЕ ВТРАЧАЛА ЗВ'ЯЗОК
+    long duration = pulseIn(echoPin, HIGH, 30000);
     waterDistance = duration * 0.034 / 2; 
     
     waterPercent = map(waterDistance, 10, 5, 0, 100);
