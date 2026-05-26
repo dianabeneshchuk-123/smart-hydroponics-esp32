@@ -368,7 +368,7 @@ void loop() {
   if (oldPumpStatus != waterPumpStatus) {
     displayNeedsUpdate = true;
     
-    delay(50); 
+    delay(20); 
     tft.begin();
     tft.setRotation(1);
     tft.fillScreen(ILI9341_BLACK);
