@@ -68,7 +68,7 @@ Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 // ==========================================
 const int lightSensorPin = 34; 
 const int relay1Pin = 25;      
-const int relay2Pin = 19;      
+const int relay2Pin = 19;      // ВАШ НОВИЙ ПІН ДЛЯ ПОМПИ (замість 26)
 const int buttonPin = 33;      
 
 int threshold = 2000; 
@@ -84,43 +84,18 @@ bool rpcPumpON = false;
 unsigned long rpcPumpTimer = 0; // Таймер для 5 секунд
 
 // ==========================================
-// ОНОВЛЕНА ФУНКЦІЯ ДЛЯ ПРИЙОМУ RPC-КОМАНД (Універсальна)
+// ТЕСТОВИЙ CALLBACK: РЕАГУЄ НА БУДЬ-ЯКИЙ СИГНАЛ
 // ==========================================
 void callback(char* topic, byte* payload, unsigned int length) {
-  String message = "";
-  for (int i = 0; i < length; i++) {
-    message += (char)payload[i];
-  }
-
-  // Вивід у Serial Monitor (PlatformIO Термінал) для повної діагностики JSON
-  Serial.print("Received RPC: ");
-  Serial.println(message);
-
+  // Як тільки долітає БУДЬ-ЯКА команда з інтернету — вмикаємо помпу!
+  rpcPumpON = true; 
+  rpcPumpTimer = millis(); // Запускаємо 5 секунд
+  
+  // Надсилаємо серверу відповідь, що все ок
   if (String(topic).indexOf("v1/devices/me/rpc/request/") != -1) {
     String requestId = String(topic).substring(String(topic).lastIndexOf("/") + 1);
     String replyTopic = "v1/devices/me/rpc/response/" + requestId;
-
-    // Перевіряємо Обидва методи: і старий setValue, і новий setState від кнопок
-    if (message.indexOf("\"method\":\"setValue\"") != -1 || message.indexOf("\"method\":\"setState\"") != -1) {
-      
-      // Ловимо true у будь-якому форматі JSON (прямому чи вкладеному {"value":true})
-      if (message.indexOf("\"params\":true") != -1 || message.indexOf("\"value\":true") != -1) {
-        rpcPumpON = true; 
-        rpcPumpTimer = millis(); // Запускаємо 5 секунд
-        client.publish(replyTopic.c_str(), "{\"success\":true}");
-        Serial.println("-> PUMP TRIGGERED: ON (5 SECONDS)");
-      } 
-      else if (message.indexOf("\"params\":false") != -1 || message.indexOf("\"value\":false") != -1) {
-        rpcPumpON = false; 
-        client.publish(replyTopic.c_str(), "{\"success\":false}");
-        Serial.println("-> PUMP TRIGGERED: OFF");
-      }
-    }
-    // Перевіряємо запит стану: getValue або getState
-    else if (message.indexOf("\"method\":\"getValue\"") != -1 || message.indexOf("\"method\":\"getState\"") != -1) {
-      String replyPayload = (waterPumpStatus == "ON ") ? "true" : "false";
-      client.publish(replyTopic.c_str(), replyPayload.c_str());
-    }
+    client.publish(replyTopic.c_str(), "{\"success\":true}");
   }
 }
 
@@ -128,16 +103,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
 // NON-BLOCKING MQTT RECONNECT FUNKTION
 // ==========================================
 boolean reconnectMQTT() {
-  Serial.print("Connecting to ThingsBoard MQTT...");
   if (client.connect("ESP32_Hydroponics", TOKEN, NULL)) {
-    Serial.println(" [SUCCESS] Connected!");
     client.subscribe("v1/devices/me/rpc/request/+"); 
     // Додаємо підписку на новий формат RPC для ThingsBoard 4.x
     client.subscribe("v1/devices/me/rpc/+"); 
     return true;
   }
-  Serial.print(" [FAILED] Error state: ");
-  Serial.println(client.state());
   return false;
 }
 
@@ -312,7 +283,7 @@ void loop() {
     delayMicroseconds(10);
     digitalWrite(trigPin, LOW);
     
-    // ДОДАНО ТАЙМАУТ 30 мс, ЩОБ ПЛАТА НЕ ЗАВИСАЛА І НЕ ВТРАЧАЛА ЗВ'ЯЗОК
+    // ТАЙМАУТ 30 мс, ЩОБ ПЛАТА НЕ ЗАВИСАЛА
     long duration = pulseIn(echoPin, HIGH, 30000);
     waterDistance = duration * 0.034 / 2; 
     
@@ -363,7 +334,7 @@ void loop() {
   int buttonState = digitalRead(buttonPin); 
   String oldPumpStatus = waterPumpStatus;
 
-  // ТИМЧАСОВО: ставимо true для чистого тестування кнопки ThingsBoard!
+  // ТИМЧАСОВО: ставимо true для чистого тестування!
   bool safetyAllowed = true; 
 
   // 1 ПРІОРИТЕТ: Фізична кнопка на столі
