@@ -1,20 +1,20 @@
 #include <Arduino.h>
 #include <FastLED.h>
-#include <Wire.h>                 // Kræves til I2C (BME280)
-#include <Adafruit_BME280.h>      // BME280 sensorbibliotek
-#include <SPI.h>                  // Kræves til SPI (TFT-skærm)
+#include <Wire.h>                 
+#include <Adafruit_BME280.h>      
+#include <SPI.h>                  
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
 #include <WiFi.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
-#include <OneWire.h>              // Kræves til DS18B20
-#include <DallasTemperature.h>    // Kræves til DS18B20
-#include <time.h>                 // Tilføjet til håndtering af dato
-#include <PubSubClient.h>         // Bibliotek til ThingsBoard (MQTT)
+#include <OneWire.h>              
+#include <DallasTemperature.h>    
+#include <time.h>                 
+#include <PubSubClient.h>         
 
 // ==========================================
-// WI-FI & THINGSBOARD KONFIGURATION
+// WI-FI & THINGSBOARD
 // ==========================================
 const char* ssid     = "RASPBERRYNET";     
 const char* password = "VerySecret"; 
@@ -31,7 +31,7 @@ time_t timeOffset = 7200;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", timeOffset); 
 
 // ==========================================
-// KONFIGURATION AF LED-BÅND
+// LED & SENSORS
 // ==========================================
 #define LED_PIN      32
 #define NUM_LEDS     60
@@ -39,9 +39,6 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", timeOffset);
 #define COLOR_ORDER  GRB
 CRGB leds[NUM_LEDS];
 
-// ==========================================
-// KONFIGURATION AF SENSORER
-// ==========================================
 Adafruit_BME280 bme; 
 
 #define ONE_WIRE_BUS 5 
@@ -56,7 +53,7 @@ const long interval = 2000;
 int lastSecond = -1;        
 
 // ==========================================
-// KONFIGURATION AF TFT-SKÆRM (SPI)
+// TFT SPI
 // ==========================================
 #define TFT_CS   15
 #define TFT_DC   16
@@ -64,11 +61,11 @@ int lastSecond = -1;
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 
 // ==========================================
-// SYSTEMPINS (RELÆER OG KNAP)
+// PINS
 // ==========================================
 const int lightSensorPin = 34; 
 const int relay1Pin = 25;      
-const int relay2Pin = 19;      // ВАШ НОВИЙ ПІН ДЛЯ ПОМПИ (замість 26)
+const int relay2Pin = 19;      
 const int buttonPin = 33;      
 
 int threshold = 2000; 
@@ -81,17 +78,15 @@ String waterPumpStatus = "OFF";
 String airPumpStatus = "ON ";  
 
 bool rpcPumpON = false; 
-unsigned long rpcPumpTimer = 0; // Таймер для 5 секунд
+unsigned long rpcPumpTimer = 0; 
 
 // ==========================================
-// ТЕСТОВИЙ CALLBACK: РЕАГУЄ НА БУДЬ-ЯКИЙ СИГНАЛ
+// УЛЬТРА-РАДАР: РЕАГУЄ НА ВСЕ!
 // ==========================================
 void callback(char* topic, byte* payload, unsigned int length) {
-  // Як тільки долітає БУДЬ-ЯКА команда з інтернету — вмикаємо помпу!
   rpcPumpON = true; 
-  rpcPumpTimer = millis(); // Запускаємо 5 секунд
+  rpcPumpTimer = millis(); 
   
-  // Надсилаємо серверу відповідь, що все ок
   if (String(topic).indexOf("v1/devices/me/rpc/request/") != -1) {
     String requestId = String(topic).substring(String(topic).lastIndexOf("/") + 1);
     String replyTopic = "v1/devices/me/rpc/response/" + requestId;
@@ -100,20 +95,18 @@ void callback(char* topic, byte* payload, unsigned int length) {
 }
 
 // ==========================================
-// NON-BLOCKING MQTT RECONNECT FUNKTION
+// ПІДКЛЮЧЕННЯ MQTT
 // ==========================================
 boolean reconnectMQTT() {
-  if (client.connect("ESP32_Hydroponics", TOKEN, NULL)) {
-    client.subscribe("v1/devices/me/rpc/request/+"); 
-    // Додаємо підписку на новий формат RPC для ThingsBoard 4.x
-    client.subscribe("v1/devices/me/rpc/+"); 
+  if (client.connect("ESP32_Hydroponics_Main", TOKEN, NULL)) {
+    client.subscribe("v1/devices/me/#"); 
     return true;
   }
   return false;
 }
 
 // ==========================================
-// FUNKTION TIL AT TEGNE DASHBOARDET
+// ЕКРАН
 // ==========================================
 void updateDisplay() {
   tft.setTextSize(2);
@@ -127,76 +120,99 @@ void updateDisplay() {
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.print(dateBuffer);
   tft.print("  ");
+  
   tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
   tft.print(timeClient.getFormattedTime()); 
   
-  tft.setCursor(10, 50); 
-  tft.setTextColor(ILI9341_LIGHTGREY, ILI9341_BLACK); 
+  tft.setCursor(10, 50);
+  tft.setTextColor(ILI9341_LIGHTGREY, ILI9341_BLACK);
   tft.print("AIR:");
-  tft.setCursor(10, 75); 
-  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
-  tft.print("T: "); tft.print(airTemp, 1); tft.print("C  ");
-  tft.setCursor(10, 100); 
-  tft.print("H: "); tft.print(airHum, 1); tft.print("%  ");
+  
+  tft.setCursor(10, 75);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.print("T: ");
+  tft.print(airTemp, 1);
+  tft.print("C  ");
+  
+  tft.setCursor(10, 100);
+  tft.print("H: ");
+  tft.print(airHum, 1);
+  tft.print("%  ");
 
-  tft.setCursor(160, 50); 
-  tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK); 
+  tft.setCursor(160, 50);
+  tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
   tft.print("WATER:");
-  tft.setCursor(160, 75); 
-  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
-  tft.print("T: "); 
-  if (waterTemp == -127.00) tft.print("ERR "); 
-  else { tft.print(waterTemp, 1); tft.print("C  "); }
-  tft.setCursor(160, 100); 
-  tft.print("L: "); 
-  if (waterPercent <= 10) tft.setTextColor(ILI9341_RED, ILI9341_BLACK); 
-  else tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
-  tft.print(waterPercent); tft.print("%   ");
+  
+  tft.setCursor(160, 75);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.print("T: ");
+  if (waterTemp == -127.00) {
+    tft.print("ERR ");
+  } else {
+    tft.print(waterTemp, 1);
+    tft.print("C  ");
+  }
+  
+  tft.setCursor(160, 100);
+  tft.print("L: ");
+  if (waterPercent <= 10) {
+    tft.setTextColor(ILI9341_RED, ILI9341_BLACK);
+  } else {
+    tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
+  }
+  tft.print(waterPercent);
+  tft.print("%   ");
 
   tft.setCursor(160, 125);
   if (waterPercent <= 10) {
-    tft.setTextColor(ILI9341_WHITE, ILI9341_RED); 
+    tft.setTextColor(ILI9341_WHITE, ILI9341_RED);
     tft.print(" LOW WATER ");
   } else {
-    tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK); 
+    tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
     tft.print("[LEVEL OK]");
   }
 
-  tft.setCursor(10, 160); 
-  tft.setTextColor(ILI9341_ORANGE, ILI9341_BLACK); 
+  tft.setCursor(10, 160);
+  tft.setTextColor(ILI9341_ORANGE, ILI9341_BLACK);
   tft.print("SYSTEM STATUS:");
 
-  tft.setCursor(10, 190); 
-  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
+  tft.setCursor(10, 190);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.print("Light : ");
-  if (lightStatus == "ON ") tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
-  else tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
+  if (lightStatus == "ON ") {
+    tft.setTextColor(ILI9341_YELLOW, ILI9341_BLACK);
+  } else {
+    tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
+  }
   tft.print(lightStatus);
 
-  tft.setCursor(170, 190); 
-  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
+  tft.setCursor(170, 190);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.print("A-Pump: ");
-  tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK); 
+  tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
   tft.print(airPumpStatus);
 
-  tft.setCursor(10, 215); 
-  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK); 
+  tft.setCursor(10, 215);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.print("W-Pump: ");
-  if (waterPumpStatus == "ON ") tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
-  else tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
+  if (waterPumpStatus == "ON ") {
+    tft.setTextColor(ILI9341_CYAN, ILI9341_BLACK);
+  } else {
+    tft.setTextColor(ILI9341_DARKGREY, ILI9341_BLACK);
+  }
   tft.print(waterPumpStatus);
 }
 
 void setup() {
   Serial.begin(115200); 
-
+  
   tft.begin();
-  tft.setRotation(1); 
+  tft.setRotation(1);
   tft.fillScreen(ILI9341_BLACK); 
   
   bme.begin(0x76);
   waterSensor.begin();
-
+  
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
 
@@ -207,43 +223,40 @@ void setup() {
   
   WiFi.begin(ssid, password);
   int connectionTimeout = 0;
-  while (WiFi.status() != WL_CONNECTED) { 
-    delay(500); 
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
     connectionTimeout++;
-    if(connectionTimeout > 20) break; 
+    if(connectionTimeout > 20) break;
   }
   
   client.setServer(mqtt_server, 1883);
   client.setCallback(callback); 
-  
-  // ЗБІЛЬШУЄМО БУФЕР ДЛЯ ВЕЛИКИХ RPC ПАКЕТІВ (ThingsBoard 4.x)
-  client.setBufferSize(512);
+  client.setBufferSize(1024);
 
   tft.fillScreen(ILI9341_BLACK);
-  tft.drawFastHLine(0, 35, 320, ILI9341_DARKGREY);   
-  tft.drawFastHLine(0, 150, 320, ILI9341_DARKGREY);  
+  tft.drawFastHLine(0, 35, 320, ILI9341_DARKGREY);
+  tft.drawFastHLine(0, 150, 320, ILI9341_DARKGREY);
   tft.drawFastVLine(150, 35, 115, ILI9341_DARKGREY); 
   
   timeClient.begin();
   
-  digitalWrite(relay1Pin, HIGH); 
+  digitalWrite(relay1Pin, HIGH);
   pinMode(relay1Pin, OUTPUT);
   
-  digitalWrite(relay2Pin, HIGH); 
+  digitalWrite(relay2Pin, HIGH);
   pinMode(relay2Pin, OUTPUT);
-
+  
   pinMode(buttonPin, INPUT_PULLUP); 
 
   FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(150); 
-
+  
   updateDisplay(); 
-  lastMqttReconnectAttempt = 0;
 }
 
 void loop() {
   unsigned long currentMillis = millis();
-
+  
   if (!client.connected()) {
     if (currentMillis - lastMqttReconnectAttempt > 5000) {
       lastMqttReconnectAttempt = currentMillis;
@@ -252,20 +265,19 @@ void loop() {
       }
     }
   } else {
-    client.loop(); 
+    client.loop();
   }
 
-  // --- 5-СЕКУНДНИЙ ТАЙМЕР ДЛЯ КНОПКИ З ІНТЕРНЕТУ ---
   if (rpcPumpON && (currentMillis - rpcPumpTimer >= 5000)) {
-    rpcPumpON = false; // Вимикаємо через 5 секунд
+    rpcPumpON = false;
   }
 
   timeClient.update();
   bool displayNeedsUpdate = false; 
-
+  
   if (timeClient.getSeconds() != lastSecond) {
     lastSecond = timeClient.getSeconds();
-    displayNeedsUpdate = true; 
+    displayNeedsUpdate = true;
   }
 
   if (currentMillis - previousMillis >= interval) {
@@ -273,8 +285,8 @@ void loop() {
     
     airTemp = bme.readTemperature();
     airHum = bme.readHumidity();
-
-    waterSensor.requestTemperatures(); 
+    
+    waterSensor.requestTemperatures();
     waterTemp = waterSensor.getTempCByIndex(0);
 
     digitalWrite(trigPin, LOW);
@@ -283,7 +295,6 @@ void loop() {
     delayMicroseconds(10);
     digitalWrite(trigPin, LOW);
     
-    // ТАЙМАУТ 30 мс, ЩОБ ПЛАТА НЕ ЗАВИСАЛА
     long duration = pulseIn(echoPin, HIGH, 30000);
     waterDistance = duration * 0.034 / 2; 
     
@@ -308,59 +319,68 @@ void loop() {
 
   int lightValue = analogRead(lightSensorPin);
   String oldLightStatus = lightStatus;
-
+  
   if (lightValue > threshold) {
-    if (lightStatus != "ON ") { 
-      digitalWrite(relay1Pin, LOW);            
-      delay(150);                              
-      fill_solid(leds, NUM_LEDS, CRGB::White); 
+    if (lightStatus != "ON ") {
+      digitalWrite(relay1Pin, LOW);
+      delay(150);
+      fill_solid(leds, NUM_LEDS, CRGB::White);
       FastLED.show();
-      lightStatus = "ON "; 
+      lightStatus = "ON ";
     }
   } else {
     if (lightStatus != "OFF") {
-      fill_solid(leds, NUM_LEDS, CRGB::Black); 
+      fill_solid(leds, NUM_LEDS, CRGB::Black);
       FastLED.show();
-      delay(50);                               
-      digitalWrite(relay1Pin, HIGH);           
+      delay(50);
+      digitalWrite(relay1Pin, HIGH);
       lightStatus = "OFF";
     }
   }
-  if (oldLightStatus != lightStatus) displayNeedsUpdate = true;
+  
+  if (oldLightStatus != lightStatus) {
+    displayNeedsUpdate = true;
+  }
 
-  // ==========================================
-  // ФІНАЛЬНА ІЄРАРХІЯ ЛОГІКИ ПОМПИ
-  // ==========================================
   int buttonState = digitalRead(buttonPin); 
   String oldPumpStatus = waterPumpStatus;
-
-  // ТИМЧАСОВО: ставимо true для чистого тестування!
   bool safetyAllowed = true; 
 
-  // 1 ПРІОРИТЕТ: Фізична кнопка на столі
   if (buttonState == LOW && safetyAllowed) {
-    digitalWrite(relay2Pin, LOW);   
+    digitalWrite(relay2Pin, LOW);
     waterPumpStatus = "ON ";
   } 
-  // 2 ПРІОРИТЕТ: Кнопка з ThingsBoard (5 секунд)
   else if (rpcPumpON && safetyAllowed) {
-    digitalWrite(relay2Pin, LOW); 
+    digitalWrite(relay2Pin, LOW);
     waterPumpStatus = "ON ";
   } 
-  // 3 ПРІОРИТЕТ: Вимкнено
   else {
-    digitalWrite(relay2Pin, HIGH); 
+    digitalWrite(relay2Pin, HIGH);
     waterPumpStatus = "OFF";
     if (!safetyAllowed && rpcPumpON) {
       rpcPumpON = false;
     }
   }
   
-  if (oldPumpStatus != waterPumpStatus) displayNeedsUpdate = true;
+  // ==================================================
+  // ПРОГРАМНИЙ РЕСТАРТ ЕКРАНА ПРИ ПЕРЕМИКАННІ ПОМПИ
+  // ==================================================
+  if (oldPumpStatus != waterPumpStatus) {
+    displayNeedsUpdate = true;
+    
+    delay(100); 
+    tft.begin();
+    tft.setRotation(1);
+    tft.fillScreen(ILI9341_BLACK);
+    
+    tft.drawFastHLine(0, 35, 320, ILI9341_DARKGREY);   
+    tft.drawFastHLine(0, 150, 320, ILI9341_DARKGREY);  
+    tft.drawFastVLine(150, 35, 115, ILI9341_DARKGREY);
+  }
 
   if (displayNeedsUpdate) {
     updateDisplay();
   }
-
+  
   delay(50); 
 }
