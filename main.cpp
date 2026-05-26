@@ -337,38 +337,32 @@ void loop() {
   if (oldLightStatus != lightStatus) displayNeedsUpdate = true;
 
   // ==========================================
-  // ФІНАЛЬНА ІЄРАРХІЯ ЛОГІКИ ПОМПИ (ІЗ ЗАПОБІЖНИКОМ ДЛЯ ІСПИТУ)
+  // ФІНАЛЬНА ІЄРАРХІЯ ЛОГІКИ ПОМПИ (З БЛОКУВАННЯМ РІВНЯ)
   // ==========================================
   int buttonState = digitalRead(buttonPin); 
   String oldPumpStatus = waterPumpStatus;
 
-  if (buttonState == LOW) {
-    // 1 ПРІОРИТЕТ: Фізична кнопка на столі (працює завжди, поки натиснута)
+  // Блокування: якщо рівень води більше 60%, safetyAllowed стає false
+  bool safetyAllowed = (waterPercent <= 60);
+
+  // 1 ПРІОРИТЕТ: Фізична кнопка на столі (працює завжди, поки натиснута, ЯКЩО дозволяє рівень води)
+  if (buttonState == LOW && safetyAllowed) {
     digitalWrite(relay2Pin, LOW);   
     waterPumpStatus = "ON ";
   } 
-  else if (rpcPumpON) {
-    // 2 ПРІОРИТЕТ: Кнопка з ThingsBoard (працює 5 секунд)
+  // 2 ПРІОРИТЕТ: Кнопка з ThingsBoard (працює 5 секунд, ЯКЩО дозволяє рівень води)
+  else if (rpcPumpON && safetyAllowed) {
     digitalWrite(relay2Pin, LOW); 
     waterPumpStatus = "ON ";
-    
-    // ЗАПОБІЖНИК: якщо під час цих 5 секунд вода дійде до краю бака (<= 5 см),
-    // система миттєво обірве таймер і вимкне помпу!
-    if (waterDistance <= 5) {
-      digitalWrite(relay2Pin, HIGH); 
-      waterPumpStatus = "OFF";
-      rpcPumpON = false; // Скидаємо віртуальну кнопку
-    }
   } 
+  // 3 ПРІОРИТЕТ: Вимкнення
   else {
-    // 3 ПРІОРИТЕТ: Фонова автоматика
-    if (waterDistance >= 10) {      
-      digitalWrite(relay2Pin, LOW); 
-      waterPumpStatus = "ON ";
-    } 
-    else if (waterDistance <= 5) {  
-      digitalWrite(relay2Pin, HIGH); 
-      waterPumpStatus = "OFF";
+    digitalWrite(relay2Pin, HIGH); 
+    waterPumpStatus = "OFF";
+    
+    // Якщо спрацював захист під час роботи 5-секундного таймера, скидаємо віртуальну кнопку
+    if (!safetyAllowed && rpcPumpON) {
+      rpcPumpON = false;
     }
   }
   
