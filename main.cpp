@@ -84,7 +84,7 @@ bool rpcPumpON = false;
 unsigned long rpcPumpTimer = 0; // Таймер для 5 секунд
 
 // ==========================================
-// FUNKTION TIL AT MODTAGE RPC-KOMMANDOER
+// ОНОВЛЕНА ФУНКЦІЯ ДЛЯ ПРИЙОМУ RPC-КОМАНД (ThingsBoard 4.x)
 // ==========================================
 void callback(char* topic, byte* payload, unsigned int length) {
   String message = "";
@@ -92,21 +92,29 @@ void callback(char* topic, byte* payload, unsigned int length) {
     message += (char)payload[i];
   }
 
+  // Виводимо отримане повідомлення в Serial Monitor для діагностики завад та JSON
+  Serial.print("Received RPC: ");
+  Serial.println(message);
+
   if (String(topic).indexOf("v1/devices/me/rpc/request/") != -1) {
     String requestId = String(topic).substring(String(topic).lastIndexOf("/") + 1);
+    String replyTopic = "v1/devices/me/rpc/response/" + requestId;
 
     if (message.indexOf("\"method\":\"setValue\"") != -1) {
-      if (message.indexOf("\"params\":true") != -1) {
+      // Перевіряємо обидва варіанти написання true (старий формат і новий вкладений об'єкт)
+      if (message.indexOf("\"params\":true") != -1 || message.indexOf("\"value\":true") != -1) {
         rpcPumpON = true; 
         rpcPumpTimer = millis(); // Запускаємо відлік 5 секунд!
-      } else if (message.indexOf("\"params\":false") != -1) {
+        client.publish(replyTopic.c_str(), "{\"success\":true}");
+        Serial.println("-> Pump components triggered: ON (5 seconds)");
+      } 
+      else if (message.indexOf("\"params\":false") != -1 || message.indexOf("\"value\":false") != -1) {
         rpcPumpON = false; 
+        client.publish(replyTopic.c_str(), "{\"success\":false}");
+        Serial.println("-> Pump components triggered: OFF");
       }
-      String replyTopic = "v1/devices/me/rpc/response/" + requestId;
-      client.publish(replyTopic.c_str(), "{}"); 
     }
     else if (message.indexOf("\"method\":\"getValue\"") != -1) {
-      String replyTopic = "v1/devices/me/rpc/response/" + requestId;
       String replyPayload = (waterPumpStatus == "ON ") ? "true" : "false";
       client.publish(replyTopic.c_str(), replyPayload.c_str());
     }
