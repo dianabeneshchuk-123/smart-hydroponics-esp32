@@ -68,7 +68,7 @@ Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 // ==========================================
 const int lightSensorPin = 34; 
 const int relay1Pin = 25;      
-const int relay2Pin = 26;      
+const int relay2Pin = 19;      
 const int buttonPin = 33;      
 
 int threshold = 2000; 
