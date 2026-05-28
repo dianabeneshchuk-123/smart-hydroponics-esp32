@@ -31,7 +31,7 @@ time_t timeOffset = 7200;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", timeOffset); 
 
 // ==========================================
-// LED & SENSORS
+// LED & SENSORER
 // ==========================================
 #define LED_PIN      32
 #define NUM_LEDS     60
@@ -53,7 +53,7 @@ const long interval = 2000;
 int lastSecond = -1;        
 
 // ==========================================
-// TFT SPI
+// TFT SPI SKÆRM
 // ==========================================
 #define TFT_CS   15
 #define TFT_DC   16
@@ -61,7 +61,7 @@ int lastSecond = -1;
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 
 // ==========================================
-// PINS
+// PIN-KONFIGURATION
 // ==========================================
 const int lightSensorPin = 34; 
 const int relay1Pin = 25;      
@@ -77,36 +77,18 @@ String lightStatus = "OFF";
 String waterPumpStatus = "OFF";
 String airPumpStatus = "ON ";  
 
-bool rpcPumpON = false; 
-unsigned long rpcPumpTimer = 0; 
-
 // ==========================================
-// УЛЬТРА-РАДАР: РЕАГУЄ НА ВСЕ!
-// ==========================================
-void callback(char* topic, byte* payload, unsigned int length) {
-  rpcPumpON = true; 
-  rpcPumpTimer = millis(); 
-  
-  if (String(topic).indexOf("v1/devices/me/rpc/request/") != -1) {
-    String requestId = String(topic).substring(String(topic).lastIndexOf("/") + 1);
-    String replyTopic = "v1/devices/me/rpc/response/" + requestId;
-    client.publish(replyTopic.c_str(), "{\"success\":true}");
-  }
-}
-
-// ==========================================
-// ПІДКЛЮЧЕННЯ MQTT
+// MQTT FORBINDELSE
 // ==========================================
 boolean reconnectMQTT() {
   if (client.connect("ESP32_Hydroponics_Main", TOKEN, NULL)) {
-    client.subscribe("v1/devices/me/#"); 
     return true;
   }
   return false;
 }
 
 // ==========================================
-// ЕКРАН
+// SKÆRMOPDATERING
 // ==========================================
 void updateDisplay() {
   tft.setTextSize(2);
@@ -186,9 +168,9 @@ void updateDisplay() {
   }
   tft.print(lightStatus);
 
-  tft.setCursor(170, 190);
+  tft.setCursor(160, 190);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-  tft.print("A-Pump: ");
+  tft.print("Air Pumpe:");
   tft.setTextColor(ILI9341_GREEN, ILI9341_BLACK);
   tft.print(airPumpStatus);
 
@@ -230,7 +212,6 @@ void setup() {
   }
   
   client.setServer(mqtt_server, 1883);
-  client.setCallback(callback); 
   client.setBufferSize(1024);
 
   tft.fillScreen(ILI9341_BLACK);
@@ -266,10 +247,6 @@ void loop() {
     }
   } else {
     client.loop();
-  }
-
-  if (rpcPumpON && (currentMillis - rpcPumpTimer >= 5000)) {
-    rpcPumpON = false;
   }
 
   timeClient.update();
@@ -346,36 +323,29 @@ void loop() {
   String oldPumpStatus = waterPumpStatus;
 
   // ==================================================
-  // АВТОМАТИЧНИЙ ЗАХИСТ ВІД ПЕРЕЛИВУ (60%)
+  // AUTOMATISK OVERLØBSBESKYTTELSE (60%)
   // ==================================================
   bool safetyAllowed = true; 
   if (waterPercent >= 60) {
-    safetyAllowed = false; // Якщо бак заповнено на 60%+, блокуємо помпу повністю!
+    safetyAllowed = false; // Hvis vandstanden er over 60%, blokeres pumpen helt!
   }
 
   if (buttonState == LOW && safetyAllowed) {
     digitalWrite(relay2Pin, LOW);
     waterPumpStatus = "ON ";
   } 
-  else if (rpcPumpON && safetyAllowed) {
-    digitalWrite(relay2Pin, LOW);
-    waterPumpStatus = "ON ";
-  } 
   else {
     digitalWrite(relay2Pin, HIGH);
     waterPumpStatus = "OFF";
-    if (!safetyAllowed && rpcPumpON) {
-      rpcPumpON = false;
-    }
   }
   
   // ==================================================
-  // ПРОГРАМНИЙ РЕСТАРТ ЕКРАНА ПРИ ПЕРЕМИКАННІ ПОМПИ
+  // SOFTWARE-GENSTART AF SKÆRM VED PUMPESKIFT
   // ==================================================
   if (oldPumpStatus != waterPumpStatus) {
     displayNeedsUpdate = true;
     
-    delay(30); // Оптимальний зменшений делей
+    delay(30); // Optimal reduceret forsinkelse
     tft.begin();
     tft.setRotation(1);
     tft.fillScreen(ILI9341_BLACK);
